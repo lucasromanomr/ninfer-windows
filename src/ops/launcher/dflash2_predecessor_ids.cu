@@ -23,7 +23,9 @@ __global__ void dflash2_predecessor_ids_kernel(const std::int32_t* __restrict__ 
     const std::int64_t total = static_cast<std::int64_t>(top_k) * tokens;
     for (std::int64_t idx = blockIdx.x * blockDim.x + threadIdx.x; idx < total;
          idx += static_cast<std::int64_t>(blockDim.x) * gridDim.x) {
-        const std::int32_t t = static_cast<std::int32_t>(idx % tokens);
+        // Layout is dim0-fastest {top_k, tokens}: flat idx = slot + top_k * column.
+        const std::int32_t slot = static_cast<std::int32_t>(idx % top_k);
+        const std::int32_t t = static_cast<std::int32_t>(idx / top_k);
         const std::int32_t pos = t % block_tokens;
         if (pos == 0) {
             // Anchor column: the committed anchor token (never scored).
@@ -32,8 +34,8 @@ __global__ void dflash2_predecessor_ids_kernel(const std::int32_t* __restrict__ 
             // First scored position: the anchor broadcast.
             out[idx] = anchor_ids[t / block_tokens];
         } else {
-            // One block column back in the same block.
-            out[idx] = candidate_ids[idx - 1];
+            // One block column back in the same block (same predecessor slot).
+            out[idx] = candidate_ids[idx - top_k];
         }
     }
 }

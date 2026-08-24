@@ -28,9 +28,14 @@ __global__ void dflash2_dynamic_conv_kernel(const __nv_bfloat16* __restrict__ x,
     constexpr std::int32_t group_size = kDFlash2ConvGroupSize; // 16
     const std::int32_t group_count = hidden / group_size;     // G = 320
 
+    // Layouts are dim0-fastest throughout: x/out are [hidden, tokens] with the
+    // per-token hidden vector contiguous (offset(c,t) = c + hidden*t), and
+    // dynamic is [2*kernel*G, tokens] with offset(r,t) = r + rows*t.
+    //
     // Dynamic row for (group g, tap, side): g + G * (tap + kernel * side).
     const std::int32_t dyn_row0 = side * (kernel * group_count); // tap 0
     const std::int32_t dyn_row1 = group_count + dyn_row0;        // tap 1
+    const std::int32_t dyn_rows = kernel * 2 * group_count;
     // Base row for (tap, side): base is laid out [side, tap, hidden] in memory
     // (channel innermost), so row = (side * kernel + tap) * hidden.
     const std::int32_t base_off0 = side * (kernel * hidden);
@@ -39,20 +44,22 @@ __global__ void dflash2_dynamic_conv_kernel(const __nv_bfloat16* __restrict__ x,
     const std::int64_t total = static_cast<std::int64_t>(hidden) * tokens;
     for (std::int64_t idx = blockIdx.x * blockDim.x + threadIdx.x; idx < total;
          idx += static_cast<std::int64_t>(blockDim.x) * gridDim.x) {
-        const std::int32_t c = static_cast<std::int32_t>(idx / tokens);
-        const std::int32_t t = static_cast<std::int32_t>(idx % tokens);
+        const std::int32_t c = static_cast<std::int32_t>(idx % hidden);
+        const std::int32_t t = static_cast<std::int32_t>(idx / hidden);
         const std::int32_t g = c / group_size;
 
-        const float x0 = __bfloat162float(x[static_cast<std::size_t>(idx)]);
-        const float x_prev = (t % width) >= 1 ? __bfloat162float(x[static_cast<std::size_t>(idx) - 1])
-                                              : 0.0f;
+        const float x0 = __bfloat162float(x[idx]);
+        const float x_prev =
+            (t % width) >= 1 ? __bfloat162float(x[idx - static_cast<std::int64_t>(hidden)]) : 0.0f;
 
-        const std::size_t dyn0 = (static_cast<std::size_t>(dyn_row0 + g)) * tokens + t;
-        const std::size_t dyn1 = (static_cast<std::size_t>(dyn_row1 + g)) * tokens + t;
-        const float w0 = __bfloat162float(dynamic[dyn0]) + __bfloat162float(base[base_off0 + c]);
-        const float w1 = __bfloat162float(dynamic[dyn1]) + __bfloat162float(base[base_off1 + c]);
+        const std::size_t dyn0 =
+            static_cast<std::size_t>(dyn_row0) + static_cast<std::size_t>(dyn_rows) * t;
+        const std::size_t dyn1 =
+            static_cast<std::size_t>(dyn_row1) + static_cast<std::size_t>(dyn_rows) * t;
+        const float w0 = __bfloat162float(dynamic[dyn0 + g]) + __bfloat162float(base[base_off0 + c]);
+        const float w1 = __bfloat162float(dynamic[dyn1 + g]) + __bfloat162float(base[base_off1 + c]);
 
-        out[static_cast<std::size_t>(idx)] = __float2bfloat16(w0 * x0 + w1 * x_prev);
+        out[idx] = __float2bfloat16(w0 * x0 + w1 * x_prev);
     }
 }
 

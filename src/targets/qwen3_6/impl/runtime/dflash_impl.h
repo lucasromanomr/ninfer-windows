@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <utility>
@@ -171,32 +172,37 @@ void append_context_impl(Context& state, const Tensor& features, const Tensor& p
                 Tensor key_raw =
                     attn_roots.key_raw.view({Config::head_dim, Config::kv_heads, layer_columns});
                 value = attn_roots.value.view({Config::head_dim, Config::kv_heads, layer_columns});
-                // QKV: plain W8 linear into a packed 6144-row buffer (the drafter
-                // QKV shape is 35B-incompatible for the fused attn_input_proj op),
-                // then scatter rows into the existing q/k/v recipe buffers.
-                Tensor qkv_packed = state.execution.work.alloc(
-                    DType::BF16, {Config::query_size + 2 * Config::kv_size, layer_columns});
-                ops::linear(layer_context, weight.query_key_value, qkv_packed,
-                            state.execution.device.stream);
+                // QKV: one plain W8 linear into a packed 6144-row buffer (the
+                // drafter QKV shape is 35B-incompatible for the fused
+                // attn_input_proj op), then scatter the [q | k | v] row blocks
+                // into the recipe buffers. Layout is dim0-fastest: source rows
+                // are strided by the packed width, so the scatter must be
+                // pitched, never a flat memcpy.
                 {
-                    const std::size_t row_bytes =
-                        static_cast<std::size_t>(layer_columns) * dtype_size(DType::BF16);
-                    CUDA_CHECK(cudaMemcpyAsync(query_raw.data, qkv_packed.data,
-                                               static_cast<std::size_t>(Config::query_size) * row_bytes,
-                                               cudaMemcpyDeviceToDevice,
-                                               state.execution.device.stream));
-                    CUDA_CHECK(cudaMemcpyAsync(key_raw.data,
-                                               static_cast<char*>(qkv_packed.data) +
-                                                   static_cast<std::size_t>(Config::query_size) * row_bytes,
-                                               static_cast<std::size_t>(Config::kv_size) * row_bytes,
-                                               cudaMemcpyDeviceToDevice,
-                                               state.execution.device.stream));
-                    CUDA_CHECK(cudaMemcpyAsync(value.data,
-                                               static_cast<char*>(qkv_packed.data) +
-                                                   static_cast<std::size_t>(Config::query_size + Config::kv_size) * row_bytes,
-                                               static_cast<std::size_t>(Config::kv_size) * row_bytes,
-                                               cudaMemcpyDeviceToDevice,
-                                               state.execution.device.stream));
+                    constexpr std::int32_t kPackedRows =
+                        Config::query_size + 2 * Config::kv_size;
+                    Tensor qkv_packed = state.execution.work.alloc(
+                        DType::BF16, {kPackedRows, layer_columns});
+                    ops::linear(layer_context, weight.query_key_value, qkv_packed,
+                                state.execution.device.stream);
+                    const std::size_t elem = dtype_size(DType::BF16);
+                    const auto scatter_rows = [&](std::int32_t src_row, std::int32_t dst_rows,
+                                                  void* dst) {
+                        CUDA_CHECK(cudaMemcpy2DAsync(
+                            dst, static_cast<std::size_t>(dst_rows) * elem,
+                            static_cast<const char*>(qkv_packed.data) +
+                                static_cast<std::size_t>(src_row) * elem,
+                            static_cast<std::size_t>(kPackedRows) * elem,
+                            static_cast<std::size_t>(dst_rows) * elem,
+                            static_cast<std::size_t>(layer_columns), cudaMemcpyDeviceToDevice,
+                            state.execution.device.stream));
+                    };
+                    scatter_rows(0, static_cast<std::int32_t>(Config::query_size),
+                                 query_raw.data);
+                    scatter_rows(static_cast<std::int32_t>(Config::query_size),
+                                 static_cast<std::int32_t>(Config::kv_size), key_raw.data);
+                    scatter_rows(static_cast<std::int32_t>(Config::query_size + Config::kv_size),
+                                 static_cast<std::int32_t>(Config::kv_size), value.data);
                 }
                 key = attn_roots.key.view({Config::head_dim, Config::kv_heads, layer_columns});
                 ops::rmsnorm(key_raw, weight.key_norm, Config::rms_epsilon, false, key,
@@ -518,29 +524,35 @@ void propose_batch_v2_impl(Context& state, qwen3_6::DFlashDecodeState& frame,
             Tensor query_raw = attn_roots.query_raw.view({Config::head_dim, Config::query_heads, columns});
             Tensor key_raw   = attn_roots.key_raw.view({Config::head_dim, Config::kv_heads, columns});
             Tensor value     = attn_roots.value.view({Config::head_dim, Config::kv_heads, columns});
-            // QKV: plain W8 linear into a packed 6144-row buffer (the drafter
+            // QKV: one plain W8 linear into a packed 6144-row buffer (the drafter
             // QKV shape is 35B-incompatible for the fused attn_input_proj op),
-            // then scatter rows into the existing q/k/v recipe buffers.
-            Tensor qkv_packed = state.execution.work.alloc(
-                DType::BF16, {Config::query_size + 2 * Config::kv_size, columns});
-            ops::linear(noise_conv, weight.query_key_value, qkv_packed,
-                        state.execution.device.stream);
+            // then scatter the [q | k | v] row blocks into the recipe buffers.
+            // Layout is dim0-fastest: source rows are strided by the packed
+            // width, so the scatter must be pitched, never a flat memcpy.
             {
-                const std::size_t row_bytes =
-                    static_cast<std::size_t>(columns) * dtype_size(DType::BF16);
-                CUDA_CHECK(cudaMemcpyAsync(query_raw.data, qkv_packed.data,
-                                           static_cast<std::size_t>(Config::query_size) * row_bytes,
-                                           cudaMemcpyDeviceToDevice, state.execution.device.stream));
-                CUDA_CHECK(cudaMemcpyAsync(key_raw.data,
-                                           static_cast<char*>(qkv_packed.data) +
-                                               static_cast<std::size_t>(Config::query_size) * row_bytes,
-                                           static_cast<std::size_t>(Config::kv_size) * row_bytes,
-                                           cudaMemcpyDeviceToDevice, state.execution.device.stream));
-                CUDA_CHECK(cudaMemcpyAsync(value.data,
-                                           static_cast<char*>(qkv_packed.data) +
-                                               static_cast<std::size_t>(Config::query_size + Config::kv_size) * row_bytes,
-                                           static_cast<std::size_t>(Config::kv_size) * row_bytes,
-                                           cudaMemcpyDeviceToDevice, state.execution.device.stream));
+                constexpr std::int32_t kPackedRows =
+                    Config::query_size + 2 * Config::kv_size;
+                Tensor qkv_packed = state.execution.work.alloc(
+                    DType::BF16, {kPackedRows, columns});
+                ops::linear(noise_conv, weight.query_key_value, qkv_packed,
+                            state.execution.device.stream);
+                const std::size_t elem = dtype_size(DType::BF16);
+                const auto scatter_rows = [&](std::int32_t src_row, std::int32_t dst_rows,
+                                              void* dst) {
+                    CUDA_CHECK(cudaMemcpy2DAsync(
+                        dst, static_cast<std::size_t>(dst_rows) * elem,
+                        static_cast<const char*>(qkv_packed.data) +
+                            static_cast<std::size_t>(src_row) * elem,
+                        static_cast<std::size_t>(kPackedRows) * elem,
+                        static_cast<std::size_t>(dst_rows) * elem,
+                        static_cast<std::size_t>(columns), cudaMemcpyDeviceToDevice,
+                        state.execution.device.stream));
+                };
+                scatter_rows(0, static_cast<std::int32_t>(Config::query_size), query_raw.data);
+                scatter_rows(static_cast<std::int32_t>(Config::query_size),
+                             static_cast<std::int32_t>(Config::kv_size), key_raw.data);
+                scatter_rows(static_cast<std::int32_t>(Config::query_size + Config::kv_size),
+                             static_cast<std::int32_t>(Config::kv_size), value.data);
             }
 
             // Head norms + RoPE
@@ -574,6 +586,73 @@ void propose_batch_v2_impl(Context& state, qwen3_6::DFlashDecodeState& frame,
             Tensor attn_out = state.execution.work.alloc(DType::BF16, {Config::hidden, columns});
             ops::linear(attn_roots.attention.view({Config::query_size, columns}),
                         weight.attention_output, attn_out, state.execution.device.stream);
+
+            // [dflash-debug] layer-0 intermediates: where does conditioning die?
+            if (layer == 0 && batch_size == 1 && std::getenv("NINFER_DFLASH_DEBUG") != nullptr) {
+                auto* f = std::fopen(std::getenv("NINFER_DFLASH_DEBUG_FILE"), "a");
+                if (f != nullptr) {
+                    auto grab = [&](void* dst, const void* src, std::size_t bytes) {
+                        CUDA_CHECK(cudaMemcpyAsync(dst, src, bytes, cudaMemcpyDeviceToHost,
+                                                   state.execution.device.stream));
+                    };
+                    static thread_local std::uint16_t
+                        h_nc[Config::hidden * 8],
+                        h_q[Config::head_dim * 4 * Config::block_size],
+                        h_k[Config::head_dim * Config::kv_heads * 2],
+                        h_a[Config::query_size * 8];
+                    grab(h_nc, noise_conv.data, sizeof(h_nc));
+                    grab(h_q, query.data, sizeof(h_q)); // heads 0..3, post norm+rope
+                    grab(h_k, key.data, sizeof(h_k));
+                    grab(h_a, attn_roots.attention.data, sizeof(h_a));
+                    CUDA_CHECK(cudaStreamSynchronize(state.execution.device.stream));
+                    auto bf = [](std::uint16_t b) {
+                        const std::uint32_t bits = static_cast<std::uint32_t>(b) << 16;
+                        float o = 0.0f;
+                        std::memcpy(&o, &bits, sizeof(o));
+                        return o;
+                    };
+                    // [D][H][T]: offset = d + D*h + D*H*t
+                    std::fprintf(f, "  L0 conv t0..7 mean:");
+                    for (int t = 0; t < 8; ++t) {
+                        double s = 0;
+                        for (int c = 0; c < Config::hidden; ++c) {
+                            s += bf(h_nc[c * 8 + t]);
+                        }
+                        std::fprintf(f, " %.3f", s / Config::hidden);
+                    }
+                    std::fprintf(f, " | q L2 h0..3@t1:");
+                    for (int h = 0; h < 4; ++h) {
+                        double s = 0;
+                        for (int d = 0; d < Config::head_dim; ++d) {
+                            const float v =
+                                bf(h_q[d + Config::head_dim * h +
+                                       Config::head_dim * 4 * 1]);
+                            s += v * v;
+                        }
+                        std::fprintf(f, " %.2f", std::sqrt(s));
+                    }
+                    std::fprintf(f, " | k L2 kh0..2@t1:");
+                    for (int kh = 0; kh < 3; ++kh) {
+                        double s = 0;
+                        for (int d = 0; d < Config::head_dim; ++d) {
+                            const float v = bf(h_k[d + Config::head_dim * kh +
+                                                   Config::head_dim * Config::kv_heads * 1]);
+                            s += v * v;
+                        }
+                        std::fprintf(f, " %.2f", std::sqrt(s));
+                    }
+                    std::fprintf(f, " | attn t0..7 absmean:");
+                    for (int t = 0; t < 8; ++t) {
+                        double s = 0;
+                        for (int r = 0; r < Config::query_size; ++r) {
+                            s += std::abs(bf(h_a[r * 8 + t]));
+                        }
+                        std::fprintf(f, " %.4f", s / Config::query_size);
+                    }
+                    std::fprintf(f, "\n");
+                    std::fclose(f);
+                }
+            }
 
             // attn_out_conv = two-tap dynamic conv(side=1) of attn_out
             Tensor attn_out_conv = state.execution.work.alloc(DType::BF16, {Config::hidden, columns});
@@ -768,6 +847,65 @@ void propose_batch_v2_impl(Context& state, qwen3_6::DFlashDecodeState& frame,
                 f << "  proposal_hidden(pos1) bf16raw r0-31=";
                 for (int r = 0; r < 32; ++r) { f << hid_s[r] << " "; }
                 f << std::endl;
+                // [dflash-debug logits] full copy of the drafter logits block;
+                // host-side per-column max/argmax (no layout ambiguity).
+                {
+                    const std::int32_t rows = TextConfig::output_rows;
+                    const std::size_t logit_floats =
+                        static_cast<std::size_t>(rows) * columns;  // BF16 -> 2 bytes
+                    std::vector<std::uint16_t> h_logits(logit_floats);
+                    CUDA_CHECK(cudaMemcpyAsync(h_logits.data(), logits.data,
+                                               logit_floats * sizeof(std::uint16_t),
+                                               cudaMemcpyDeviceToHost,
+                                               state.execution.device.stream));
+                    CUDA_CHECK(cudaStreamSynchronize(state.execution.device.stream));
+                    auto to_float = [](std::uint16_t b) {
+                        const std::uint32_t bits = static_cast<std::uint32_t>(b) << 16;
+                        float out = 0.0f;
+                        std::memcpy(&out, &bits, sizeof(out));
+                        return out;
+                    };
+                    for (std::int32_t t = 0; t < columns; ++t) {
+                        const std::uint16_t* col =
+                            h_logits.data() + static_cast<std::size_t>(t) * rows;
+                        float best_v = to_float(col[0]);
+                        std::int32_t best_i = 0;
+                        double sum = 0.0;
+                        for (std::int32_t i = 0; i < rows; ++i) {
+                            const float v = to_float(col[i]);
+                            sum += v;
+                            if (v > best_v) { best_v = v; best_i = i; }
+                        }
+                        f << "  logits col " << t << ": argmax=" << best_i << " max=" << best_v
+                          << " mean=" << (sum / rows) << std::endl;
+                    }
+                }
+                // [dflash-debug cache] layer-0 drafter cyclic K/V liveness: how
+                // much of the lane's cache is non-zero. Decides "context never
+                // appended" vs "appended but misread".
+                {
+                    const auto lc = dflash_state(state).local_layer(0);
+                    const std::size_t probe =
+                        std::min<std::size_t>(lc.k.bytes() / sizeof(std::uint16_t), 65536);
+                    std::vector<std::uint16_t> hk(probe), hv(probe);
+                    CUDA_CHECK(cudaMemcpyAsync(hk.data(), lc.k.data, probe * sizeof(std::uint16_t),
+                                               cudaMemcpyDeviceToHost,
+                                               state.execution.device.stream));
+                    CUDA_CHECK(cudaMemcpyAsync(hv.data(), lc.v.data, probe * sizeof(std::uint16_t),
+                                               cudaMemcpyDeviceToHost,
+                                               state.execution.device.stream));
+                    CUDA_CHECK(cudaStreamSynchronize(state.execution.device.stream));
+                    std::size_t nk = 0;
+                    std::size_t nv = 0;
+                    for (std::size_t i = 0; i < probe; ++i) {
+                        nk += hk[i] != 0;
+                        nv += hv[i] != 0;
+                    }
+                    f << "  cache L0 nonzero k=" << nk << '/' << probe << " v=" << nv << '/'
+                      << probe << " first_k=";
+                    for (std::size_t i = 0; i < 8 && i < probe; ++i) { f << hk[i] << ' '; }
+                    f << std::endl;
+                }
             }
         }
 

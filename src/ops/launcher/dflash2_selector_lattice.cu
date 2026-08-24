@@ -42,7 +42,9 @@ __device__ unsigned long long sel_key(float value, std::int32_t id) {
 
 __device__ float sel_key_value(unsigned long long key) {
     const unsigned fk = static_cast<unsigned>(key >> 32);
-    const unsigned u = (fk & 0x80000000u) ? ~fk : (fk ^ 0x80000000u);
+    // Exact inverse of float_key: positive floats were keyed as u ^ 0x80000000u
+    // (sign bit set), negatives as ~u (sign bit clear).
+    const unsigned u = (fk & 0x80000000u) ? (fk ^ 0x80000000u) : ~fk;
     return __uint_as_float(u);
 }
 
