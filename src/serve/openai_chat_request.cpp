@@ -875,18 +875,26 @@ void parse_output_limit(const Json& body, const RequestLimits& limits, OpenAICha
 
 } // namespace
 
-OpenAIChatRequest parse_chat_completion_request(const Json& body, const RequestLimits& limits) {
+OpenAIChatRequest parse_chat_completion_request(const Json& body,
+                                                const RequestLimits& limits,
+                                                const std::string& default_model) {
     require_object(body, "request body must be a JSON object");
     validate_standard_output_controls(body);
     validate_constrained_decoding_extensions(body);
     validate_compatibility_hints(body);
 
     OpenAIChatRequest output;
-    if (!body.contains("model") || !body.at("model").is_string() ||
-        body.at("model").get<std::string>().empty()) {
-        bad_request("missing required field: model", "model");
+    if (body.contains("model") && body.at("model").is_string() &&
+        !body.at("model").get<std::string>().empty()) {
+        output.model = body.at("model").get<std::string>();
+    } else {
+        // Single-model clients (e.g. the bundled prebuilt llama.cpp webui) omit
+        // `model`; serve against the loaded artifact instead of rejecting the request.
+        if (default_model.empty()) {
+            bad_request("missing required field: model", "model");
+        }
+        output.model = default_model;
     }
-    output.model = body.at("model").get<std::string>();
 
     parse_tools(body, output.generation);
     parse_tool_choice(body, output.generation);
