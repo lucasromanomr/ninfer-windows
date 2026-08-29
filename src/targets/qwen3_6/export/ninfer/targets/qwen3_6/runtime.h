@@ -133,8 +133,9 @@ class PressurePlanningSession;
 //
 // The plan types declare their moves/move-assignments here and define them per variant in
 // api_impl.h with explicit bodies: any implicit definition needs the complete detail impl types
-// (only the exact target TUs have them), and MSVC 19.44 does not emit out-of-line `= default`
-// explicit specializations of these moves (LNK2019 at the final Windows link).
+// (only the exact target TUs have them).  MSVC 19.44 must not see out-of-line `= default`
+// explicit specializations of these moves - it drops them and the final Windows link fails
+// with LNK2019, so the bodies move the impl_ pointer by hand.
 template <class Variant>
 class SequencePlan {
 public:
