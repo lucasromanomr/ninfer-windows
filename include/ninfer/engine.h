@@ -77,10 +77,14 @@ public:
     [[nodiscard]] PromptCapabilities prompt_capabilities() const;
     [[nodiscard]] ModelSamplingDefaults sampling_defaults() const;
 
-    // Establishes queue membership synchronously. Destroying an unconsumed handle cancels its
-    // request; wait() owns result consumption and may run independently from GPU execution.
+    // Establishes queue membership synchronously with a fixed output consumer mode. Destroying an
+    // unconsumed handle cancels its request; wait() owns result consumption and may run
+    // independently from GPU execution. Streaming mode requires a non-null sink in wait() and
+    // publishes one exact GenerationStart before output deltas; Aggregate mode requires a null
+    // sink.
     [[nodiscard]] GenerationHandle
     submit(PreparedPrompt prompt, RequestOptions options,
+           OutputConsumerMode consumer_mode                       = OutputConsumerMode::Aggregate,
            std::chrono::steady_clock::time_point pending_deadline = {});
 
     GenerationResult generate(PreparedPrompt prompt, RequestOptions options,

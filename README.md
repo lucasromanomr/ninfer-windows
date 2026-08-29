@@ -66,19 +66,27 @@ What this fork adds on top of upstream:
 Everything else — the Linux build path, the RTX 5090 (`sm_120a`) target, the CUDA 13.1
 requirement, and the NVFP4/W4A4 Blackwell execution paths — is unchanged from upstream.
 
+## Resource-aware long-context reuse
+
+A reusable prefix checkpoint contains KV and the complete continuation state for its exact prompt
+frontier. A Device-resident checkpoint resumes directly. Under pressure, the planner weighs Device
+retention, pinned Host State/KV, and eviction by immediate restore work and later reuse cost. Active
+requests retain their completion reservations.
+
+See [Resource scheduling and context cache](docs/maintainer/resource-scheduling-and-context-cache.md)
+for the algorithm and [Serve TTFT benchmark](tools/bench/ttft/) for public-HTTP coverage of hot
+reuse, Host resume, eviction, shared prefixes, scheduling boundaries, and multimodal load.
+
 ## Performance
 
-The published measurements cover the three Qwen3.6 artifact profiles and the Qwen3.8-27B NVFP4
-profile. The Qwen3.8-27B `groupwise-int` profile is supported by current NInfer builds but is not
-yet included in a published benchmark campaign.
+Published measurements use an RTX 5090. [Performance](docs/performance.md) records the exact
+benchmark profiles and methodology.
 
 ### Concurrent MTP3 decode
 
-Saturated decode was measured on an RTX 5090 with INT8 group-64 KV cache, CUDA Graphs, MTP3, and
-one 8,192-token generation per active request. The values below are aggregate committed decode
-throughput from complete one-second intervals in which the actual decode batch remained equal to
-the configured concurrency. MTP acceptance is aggregated over the complete request wave. Each
-concurrency cell reports `decode tok/s / MTP acceptance`; profiles should be read independently.
+Saturated decode used INT8 group-64 KV, CUDA Graphs, MTP3, and one 8,192-token generation per active
+request. Values are aggregate committed decode throughput and MTP acceptance from complete
+intervals whose actual decode batch equaled the configured concurrency.
 
 | Model profile | C=1 tok/s / accept | C=2 tok/s / accept | C=4 tok/s / accept | C=8 tok/s / accept | C8 / C1 |
 |---|---:|---:|---:|---:|---:|
@@ -87,72 +95,38 @@ concurrency cell reports `decode tok/s / MTP acceptance`; profiles should be rea
 | Qwen3.6-35B-A3B `groupwise-int` | 593.0 / 67.2% | 877.7 / 68.2% | 1,166.0 / 69.8% | 1,313.8 / 67.3% | 2.22× |
 | Qwen3.8-27B `nvfp4` | 143.8 / 48.9% | 267.6 / 48.1% | 461.1 / 45.8% | 766.6 / 46.0% | 5.33× |
 
-At C=8, Qwen3.6-35B-A3B reaches **1,313.8 aggregate decode tok/s**. Qwen3.6-27B NVFP4 reaches
-**1,146.9 tok/s** and **5.67×** its C=1 throughput. Qwen3.8-27B NVFP4 has **45.8–48.9%** MTP
-acceptance, versus **67.2–71.4%** across the other measured profiles, so aggregate committed
-throughput reflects both execution performance and speculative acceptance.
-
 ### Single-request serving
 
-The single-request corpus was measured on the same GPU with INT8 group-64 KV cache, CUDA Graphs,
-and a 1,024-token prefill chunk. Each reported fixture uses five fixed seeds after server warm-up.
-Targets and weight profiles are reported independently rather than as cross-target comparisons.
-Requests were submitted serially to a persistent server. The Qwen3.8-27B NVFP4 MTP0 results use the
-same dedicated serial corpus runner as the Qwen3.6 profiles; its MTP3 results come from the C=1 point
-of the fixed concurrent-corpus campaign documented in [Performance](docs/performance.md).
+The serial serving corpus used INT8 group-64 KV, CUDA Graphs, a 1,024-token prefill chunk, and five
+fixed seeds after warm-up. The table keeps one short-prefill, one extreme-prefill, and one
+structured-output MTP3 point for each published profile; the full context and scenario matrices are
+in the performance document.
 
-**Qwen3.6-35B-A3B**
-
-- MTP0 at a 7,680-token prompt: **15,544.3 prefill tok/s** and **271.1 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **5,157.1 prefill tok/s** and **188.2 decode tok/s**.
-- MTP3 long reasoning: **620.3–726.2 decode tok/s** with **72.7–82.8% acceptance**.
-- MTP3 structured output: **770.9 decode tok/s**, **89.1% acceptance**, and **3.67 tokens/round**.
-
-**Qwen3.6-27B (`groupwise-int`)**
-
-- MTP0 at a 7,680-token prompt: **3,218.1 prefill tok/s** and **77.6 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **1,614.8 prefill tok/s** and **54.8 decode tok/s**.
-- MTP3 long reasoning: **161.9–175.4 decode tok/s** with **73.4–78.8% acceptance**.
-- MTP3 structured output: **193.0 decode tok/s**, **88.7% acceptance**, and **3.66 tokens/round**.
-
-**Qwen3.6-27B (`nvfp4`)**
-
-- MTP0 at a 7,680-token prompt: **11,191.5 prefill tok/s** and **86.4 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **2,510.6 prefill tok/s** and **59.9 decode tok/s**.
-- MTP3 long reasoning: **213.1–231.0 decode tok/s** with **76.3–81.1% acceptance**.
-- MTP3 structured output: **252.2 decode tok/s**, **89.8% acceptance**, and **3.69 tokens/round**.
-- Against groupwise-int on the same corpus and runtime options: **3.48× the 7,680-token prefill
-  throughput**, **1.55× the 260,096-token prefill throughput**, and **30–32% higher MTP3 decode
-  throughput**.
-
-**Qwen3.8-27B (`nvfp4`)**
-
-- MTP0 at a 7,680-token prompt: **8,340.4 prefill tok/s** and **71.2 decode tok/s**.
-- MTP0 at a 260,096-token prompt: **2,203.1 prefill tok/s** and **52.9 decode tok/s**.
-- MTP3 long reasoning: **151.4–195.2 decode tok/s** with **56.2–76.0% acceptance**.
-- MTP3 structured output: **219.8 decode tok/s**, **90.8% acceptance**, and **3.72 tokens/round**.
-
-See [Performance](docs/performance.md) for the full methodology, variability, reproduction command,
-and per-fixture results.
+| Model profile | 7,680-token prefill | 260,096-token prefill | Structured MTP3 decode |
+|---|---:|---:|---:|
+| Qwen3.6-35B-A3B `groupwise-int` | 15,544.3 tok/s | 5,157.1 tok/s | 770.9 tok/s |
+| Qwen3.6-27B `groupwise-int` | 3,218.1 tok/s | 1,614.8 tok/s | 193.0 tok/s |
+| Qwen3.6-27B `nvfp4` | 11,191.5 tok/s | 2,510.6 tok/s | 252.2 tok/s |
+| Qwen3.8-27B `nvfp4` | 8,340.4 tok/s | 2,203.1 tok/s | 219.8 tok/s |
 
 ## Evaluation
 
 Capability scores were measured through NInfer's OpenAI-compatible serving route with thinking
-enabled, MTP=3, and EvalScope 1.9.0 (0-shot, rule scoring, one sample per problem):
+enabled, MTP3, and EvalScope 1.9.0 (0-shot, rule scoring, one sample per problem):
 
-| Model profile | AIME 2025 | AIME 2026 | GPQA-Diamond |
-|---|---:|---:|---:|
-| [Qwen3.6-27B groupwise-int](model-cards/Qwen3.6-27B-NInfer/README.md) | 86.67% | 93.33% | 86.87% |
-| [Qwen3.6-27B NVFP4](model-cards/Qwen3.6-27B-nvfp4-NInfer/README.md) | 93.33% | 93.33% | 84.34% |
-| [Qwen3.6-35B-A3B groupwise-int](model-cards/Qwen3.6-35B-A3B-NInfer/README.md) | 90.00% | 90.00% | 85.35% |
-| [Qwen3.8-27B NVFP4](model-cards/Qwen3.8-27B-nvfp4-NInfer/README.md) | — | — | 88.38% |
+| Model profile | AIME 2025 | AIME 2026 | GPQA-Diamond | ERQA | RealWorldQA |
+|---|---:|---:|---:|---:|---:|
+| [Qwen3.6-27B groupwise-int](model-cards/Qwen3.6-27B-NInfer/README.md) | 86.67% | 93.33% | 86.87% | — | — |
+| [Qwen3.6-27B NVFP4](model-cards/Qwen3.6-27B-nvfp4-NInfer/README.md) | 93.33% | 93.33% | 84.34% | — | — |
+| [Qwen3.6-35B-A3B groupwise-int](model-cards/Qwen3.6-35B-A3B-NInfer/README.md) | 90.00% | 90.00% | 85.35% | — | — |
+| [Qwen3.8-27B groupwise-int](model-cards/Qwen3.8-27B-NInfer/README.md) | 96.67% | 96.67% | 87.37% | 66.25% | 82.22% |
+| [Qwen3.8-27B NVFP4](model-cards/Qwen3.8-27B-nvfp4-NInfer/README.md) | 96.67% | 96.67% | 90.40% | 66.25% | 83.53% |
 
-The Qwen3.8-27B groupwise-int profile has not yet been added to this published evaluation campaign;
-the Qwen3.8-27B NVFP4 profile currently reports GPQA-Diamond only.
-
-These are single-sample results under that NInfer evaluation profile, not pass@k. See the model
-cards and [full performance document](docs/performance.md) for correct/total counts and evaluation
-notes.
+The Qwen3.6 rows used temperature 0.6 and presence penalty 1.0; the Qwen3.8 rows used temperature
+1.0 and presence penalty 0.0. Multimodal evaluation used `--vision` and an 81,920-token context
+limit. Text evaluation used 262,144 tokens except Qwen3.8-27B NVFP4, which used 252,928 tokens to
+fit the RTX 5090 after weights. Each score is one sample per problem; model cards contain the
+correct/total counts and evaluation notes.
 
 ## Requirements
 
@@ -248,15 +222,13 @@ notes on the resulting DLL layout.
 
 ## Docker
 
-Build the runtime image on a 64-bit Linux host with an RTX 5090, a CUDA 13.1-compatible NVIDIA
-driver, Docker, and the
-[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+Build the runtime image on a host with the NVIDIA Container Toolkit:
 
 ```bash
 docker build --tag ninfer:local .
 ```
 
-Download a model into `models/` as described below, then run the HTTP server:
+Mount the downloaded model and run the same example server profile:
 
 ```bash
 docker run --rm \
@@ -264,20 +236,19 @@ docker run --rm \
   --publish 8080:8080 \
   --volume "$PWD/models:/models:ro" \
   ninfer:local \
-  ninfer-serve /models/qwen3_6_27b.ninfer \
-  --host 0.0.0.0
+  ninfer-serve /models/qwen3_8_27b_nvfp4.ninfer \
+  --host 0.0.0.0 \
+  --max-context 240000 \
+  --kv-capacity 240000 \
+  --max-concurrency 2 \
+  --kv-dtype fp8 \
+  --device-state-slots 2 \
+  --host-state-slots 8 \
+  --host-kv-mib 8192 \
+  --spec mtp --draft-tokens 3 \
+  --lm-head-draft \
+  --preserve-thinking
 ```
-
-Run the CLI from the same image:
-
-```bash
-docker run --rm \
-  --gpus '"device=0"' \
-  --volume "$PWD/models:/models:ro" \
-  ninfer:local \
-  ninfer /models/qwen3_6_27b.ninfer \
-  --prompt "Explain prefill and decode in three sentences." \
-  --max-new 256
 ```
 
 ## Download a model
@@ -310,28 +281,23 @@ hf download neroued/Qwen3.6-35B-A3B-NInfer \
   --local-dir models
 ```
 
-Current NInfer builds accept only the version-2 artifact container, and all five downloads above
-are version 2. Migration applies only to Qwen3.6 artifacts downloaded before their version-2
-publication; both Qwen3.8-27B profiles were published directly as version 2. Migrate an older exact
-local file in place:
+Each `.ninfer` file contains the weights and frontend resources needed by NInfer. It is not a
+Transformers checkpoint, Safetensors distribution, or GGUF file.
+
+## Artifact and startup notes
+
+Current builds accept only version-2 `.ninfer` containers. All five published downloads are version
+2. Migration is needed only for Qwen3.6 artifacts downloaded before their version-2 publication:
 
 ```bash
 python3 -m tools.artifact.migrate_v1_to_v2 models/qwen3_6_27b.ninfer
 ```
 
-Use the same command with `qwen3_6_27b_nvfp4.ninfer` or `qwen3_6_35b_a3b.ninfer` for those
-artifacts. The migration updates only container metadata; it does not rewrite the weight payload.
-Alternatively, download the current version-2 file again from its Hugging Face repository.
+Use the same command with the exact older Qwen3.6 NVFP4 or 35B-A3B file. Migration updates container
+metadata without rewriting the weight payload.
 
-Each `.ninfer` file contains the weights and frontend resources needed by NInfer. It is not a
-Transformers checkpoint, Safetensors distribution, or GGUF file.
-
-Each artifact is complete, while GPU residency is fixed at process startup. Speculative decoding is
-disabled by default, so MTP/DFlash state and the optimized proposal head are not uploaded.
-Vision is also disabled by default, so its weights, Vision scratch phase, and frozen
-request-transient allocation are omitted. Add `--vision` to the CLI or server process that must
-accept image or video input. Disabled capabilities cannot be enabled by a later request. DFlash is
-available only for the 35B-A3B target and is text-only.
+GPU residency is fixed at process startup. `--spec` selects speculative decoding residency, and
+`--vision` selects Vision residency. DFlash is available for text-only Qwen3.6-35B-A3B execution.
 
 ## Run the CLI
 
@@ -388,54 +354,52 @@ The server also implements OpenAI Responses Core (typed Items, semantic SSE, loc
 state, and function calls) plus Anthropic Messages, token counting, and multimodal input. See
 [HTTP serving](docs/serving.md).
 
-## Capabilities
+## Capabilities and limits
 
-All three registered model IDs support:
+All registered model IDs support:
 
 - text generation with thinking and non-thinking prompt modes;
 - image, multi-image, video, and mixed multimodal messages;
-- chunked prefill and CUDA Graph decode;
-- startup-bounded small-scale concurrent serving with true batched decode;
+- chunked prefill, exact-batch CUDA Graph decode, and startup-bounded batched decode;
 - MTP speculative decoding with draft windows from one to five;
-- BF16 and INT8 group-64 KV cache;
-- model- and thinking-mode-aware official sampling defaults, with explicit greedy, temperature,
-  top-k, top-p, min-p, and presence/frequency-penalty overrides;
-- compatible-prefix reuse;
-- OpenAI Responses Core, OpenAI Chat Completions, and Anthropic Messages, including streaming and
-  usage accounting;
-- prompt-rendered function tools and parsed tool calls.
+- BF16, INT8 group-64, and row-scaled FP8 E4M3 KV storage;
+- private and shared exact-prefix reuse with Device/Host State and KV retention;
+- model-aware sampling defaults and explicit sampler overrides;
+- OpenAI Responses Core, OpenAI Chat Completions, and Anthropic Messages, including streaming,
+  tools, local response state, token counting, and usage accounting.
 
-The 35B-A3B target additionally supports text-only DFlash speculative decoding with draft windows
-from one to fifteen.
+The 35B-A3B target additionally supports text-only DFlash with draft windows from one to fifteen.
 
-## Current limits
+The product boundary remains intentionally small:
 
-- Only the five `(model_id, weights_id)` artifact identities listed above are accepted product
-  identities.
-- Execution is specialized for one RTX 5090 and one CUDA device.
-- One Engine owns one resident model and supports a startup-fixed capacity of 1–8 active requests.
-  Decode-ready requests are compacted at round boundaries and executed in one batched model
-  traversal.
-- NInfer does not provide large-scale or preemptive continuous batching, priority/QoS scheduling,
-  multi-GPU execution, CPU/GPU offload, or distributed serving.
-- `--max-context` is the logical ceiling of each sequence and is configurable up to the registered
-  models' native 262,144-token limit. `--kv-capacity N` explicitly sizes the shared Main Text KV
-  pool for all active and retained sequences, while `--kv-capacity auto` selects the largest usable
-  capacity from the memory remaining after weights are loaded while preserving 1 GiB of sizing
-  headroom. Omission defaults to one `--max-context` worth of pages. The resolved pool is fixed at
-  startup and is not divided statically among request lanes.
-- Tool calls are parsed and returned to the client; NInfer does not execute tools.
-- The C++ headers are used by the in-tree applications and are not distributed as an installed SDK.
+- one RTX 5090 and one resident model per Engine;
+- a startup-fixed capacity of one to eight active requests with bounded FIFO ingress;
+- no request preemption, priority/QoS, active-request swapping, weight offload, multi-GPU, or
+  distributed serving;
+- one shared startup-fixed KV pool across active requests and retained prefixes;
+- no runtime model discovery or unregistered checkpoint fallback;
+- parsed tool calls are returned to the client; NInfer does not execute tools;
+- the in-tree C++ headers are not distributed as an installed SDK.
+
+`--max-context` is each sequence's logical limit. `--kv-capacity` sizes the shared Main Text KV pool
+used by active requests and retained prefixes; `auto` resolves the largest legal capacity at
+startup from the memory remaining after weights while keeping 1 GiB of sizing headroom. Explicit
+capacities remain fixed for the process lifetime.
 
 ## Documentation
 
-- [Contributing](CONTRIBUTING.md)
 - [Documentation index](docs/README.md)
 - [CLI](docs/cli.md)
 - [HTTP serving](docs/serving.md)
 - [Performance](docs/performance.md)
 - [Windows](docs/windows.md)
+- [Resource scheduling and context cache](docs/maintainer/resource-scheduling-and-context-cache.md)
+- [Serve TTFT benchmark](tools/bench/ttft/)
 - [CLI examples](examples/cli/)
+- [Contributing](CONTRIBUTING.md)
+
+Run `./build/apps/ninfer --help` or `./build/apps/ninfer-serve --help` for the exact current option
+contract.
 
 ## License
 
