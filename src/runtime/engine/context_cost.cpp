@@ -12,7 +12,15 @@
 #include <system_error>
 #include <utility>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <intrin.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace ninfer::runtime {
 
@@ -23,10 +31,20 @@ const std::vector<ContextCostMachinePreset>& compiled_context_cost_defaults();
 namespace {
 
 using Json = nlohmann::json;
+#if defined(__SIZEOF_INT128__)
 using U128 = unsigned __int128;
+#endif
 
 constexpr std::size_t direction_index(ContextTransferDirection direction) noexcept {
     return static_cast<std::size_t>(direction);
+}
+
+std::uint64_t process_id() noexcept {
+#ifdef _WIN32
+    return static_cast<std::uint64_t>(::GetCurrentProcessId());
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
 }
 
 std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right) noexcept {
@@ -36,18 +54,39 @@ std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right) noexcept {
 }
 
 std::uint64_t saturating_product(std::uint64_t left, std::uint64_t right) noexcept {
+#if defined(__SIZEOF_INT128__)
     const U128 product = static_cast<U128>(left) * right;
     return product > std::numeric_limits<std::uint64_t>::max()
                ? std::numeric_limits<std::uint64_t>::max()
                : static_cast<std::uint64_t>(product);
+#else
+    return right != 0 && left > std::numeric_limits<std::uint64_t>::max() / right
+               ? std::numeric_limits<std::uint64_t>::max()
+               : left * right;
+#endif
 }
 
 std::uint64_t q32_product_ns(std::uint64_t coefficient, std::uint64_t units) noexcept {
     if (coefficient == 0 || units == 0) { return 0; }
+#if defined(__SIZEOF_INT128__)
     const U128 product        = static_cast<U128>(coefficient) * units;
     const U128 maximum_scaled = static_cast<U128>(std::numeric_limits<std::uint64_t>::max()) << 32U;
     if (product >= maximum_scaled) { return std::numeric_limits<std::uint64_t>::max(); }
     return static_cast<std::uint64_t>((product + kContextCostQ32One - 1U) >> 32U);
+#else
+    // MSVC x64: reconstruct the 128-bit product from _umul64 (hi) and the 64-bit
+    // low half, saturate, then ceil-divide by 2^32 (equivalence verified by
+    // fuzz_u128.py; the saturation check guarantees the final sum stays <= u64max).
+    const std::uint64_t hi = _umul64(coefficient, units);
+    const std::uint64_t lo = coefficient * units;
+    constexpr std::uint64_t kSatHi = 0xFFFFFFFFULL;
+    constexpr std::uint64_t kSatLo = 0xFFFFFFFF00000000ULL;
+    if (hi > kSatHi || (hi == kSatHi && lo >= kSatLo)) {
+        return std::numeric_limits<std::uint64_t>::max();
+    }
+    const std::uint64_t shifted = (hi << 32U) | (lo >> 32U);
+    return shifted + ((lo & 0xFFFFFFFFULL) ? 1U : 0U);
+#endif
 }
 
 void require_object(const Json& value, std::string_view context) {
@@ -296,7 +335,7 @@ void write_document_atomic(const std::filesystem::path& path, const Json& docume
     if (!path.parent_path().empty()) { std::filesystem::create_directories(path.parent_path()); }
 
     std::filesystem::path temporary = path;
-    temporary += ".tmp." + std::to_string(static_cast<long long>(::getpid())) + "." +
+    temporary += ".tmp." + std::to_string(static_cast<long long>(process_id())) + "." +
                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     try {
         {

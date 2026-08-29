@@ -399,12 +399,27 @@ std::vector<TextCase> text_cases(std::uint32_t chunk) {
 }
 
 std::uint64_t attention_pairs(std::uint32_t prefix, std::uint32_t suffix) {
+#if defined(__SIZEOF_INT128__)
     const unsigned __int128 pairs = static_cast<unsigned __int128>(prefix) * suffix +
                                     static_cast<unsigned __int128>(suffix) * (suffix + 1ULL) / 2U;
     if (pairs > std::numeric_limits<std::uint64_t>::max()) {
         throw std::overflow_error("prefill attention-pair count exceeds uint64");
     }
     return static_cast<std::uint64_t>(pairs);
+#else
+    // MSVC x64: no __int128. prefix*suffix fits in 64 bits (both <= u32). The
+    // triangular term is split so each product fits in 64 bits; throw on overflow.
+    const std::uint64_t linear = static_cast<std::uint64_t>(prefix) * suffix;
+    const std::uint64_t triangular =
+        (suffix & 1U) == 0
+            ? static_cast<std::uint64_t>(suffix >> 1U) * (static_cast<std::uint64_t>(suffix) + 1U)
+            : static_cast<std::uint64_t>(suffix) *
+                  (static_cast<std::uint64_t>(suffix >> 1U) + 1U);
+    if (linear > std::numeric_limits<std::uint64_t>::max() - triangular) {
+        throw std::overflow_error("prefill attention-pair count exceeds uint64");
+    }
+    return linear + triangular;
+#endif
 }
 
 std::vector<std::uint8_t> block_ppm(int width, int height, std::uint8_t value) {
