@@ -74,11 +74,12 @@ std::uint64_t q32_product_ns(std::uint64_t coefficient, std::uint64_t units) noe
     if (product >= maximum_scaled) { return std::numeric_limits<std::uint64_t>::max(); }
     return static_cast<std::uint64_t>((product + kContextCostQ32One - 1U) >> 32U);
 #else
-    // MSVC x64: reconstruct the 128-bit product from _umul64 (hi) and the 64-bit
-    // low half, saturate, then ceil-divide by 2^32 (equivalence verified by
-    // fuzz_u128.py; the saturation check guarantees the final sum stays <= u64max).
-    const std::uint64_t hi = _umul64(coefficient, units);
-    const std::uint64_t lo = coefficient * units;
+    // MSVC x64: _umul128 returns the low 64 bits of the 128-bit product and
+    // stores the high 64 bits in *hi. Reconstruct, saturate, then ceil-divide
+    // by 2^32 (equivalence verified by fuzz_u128.py; the saturation check
+    // guarantees the final sum stays <= u64max).
+    std::uint64_t hi = 0;
+    const std::uint64_t lo = _umul128(coefficient, units, &hi);
     constexpr std::uint64_t kSatHi = 0xFFFFFFFFULL;
     constexpr std::uint64_t kSatLo = 0xFFFFFFFF00000000ULL;
     if (hi > kSatHi || (hi == kSatHi && lo >= kSatLo)) {
