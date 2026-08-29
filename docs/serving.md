@@ -321,11 +321,15 @@ String `input` is normalized to one user `message` with an `input_text` part. Ar
 | `function_call` | completed assistant call with optional `id` and namespace, plus required `call_id`, `name`, and JSON-object string `arguments` |
 | `function_call_output` | completed result with required `call_id` and optional matching name/namespace assertion; `output` may be a string or a non-empty array of `input_text`/`input_image` parts |
 
-Adjacent function-call Items are grouped into one assistant history turn. A reasoning Item attaches
-to the following assistant message or function call. Results are validated by `call_id` and reordered
-to call declaration order before prompt rendering; unknown, duplicate, or unrepresentable partial
-result sets fail with `invalid_tool_history`. Canonical input Items retain client order. Input Item
-IDs are preserved when supplied and generated otherwise; duplicate IDs fail.
+Contiguous assistant-owned Items form one assistant history turn in the representable order
+`reasoning` -> assistant message content -> `function_call`. Multiple message Items append their
+content parts, multiple calls retain declaration order, and a reasoning-only turn is retained. A
+user, system, developer, or `function_call_output` Item ends the group; an order that would require
+rearranging assistant content fails with `invalid_assistant_history`. Results are validated by
+`call_id` and reordered to call declaration order before prompt rendering; unknown, duplicate, or
+unrepresentable partial result sets fail with `invalid_tool_history`. Canonical input Items retain
+client order. Input Item IDs are preserved when supplied and generated otherwise; duplicate IDs
+fail.
 
 System and developer message Items retain their positions in the input array. Top-level
 `instructions` is represented as a leading developer turn for the current request; target-specific

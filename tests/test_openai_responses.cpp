@@ -41,6 +41,15 @@ std::string api_code(const std::function<void()>& action) {
     return {};
 }
 
+ApiError api_error(const std::function<void()>& action) {
+    try {
+        action();
+    } catch (const ApiException& exception) { return exception.error(); } catch (...) {
+        return ApiError{.status = 0, .message = "wrong exception"};
+    }
+    return ApiError{.status = 0, .message = "no exception"};
+}
+
 Json parse_event(const std::string& wire) {
     const std::size_t newline = wire.find('\n');
     if (!wire.starts_with("event: ") || newline == std::string::npos || !wire.ends_with("\n\n")) {
@@ -282,6 +291,202 @@ int test_typed_items_and_cache_markers() {
                           translated.context_cache.markers[1].kind ==
                               ninfer::PromptCacheMarkerKind::SharedStablePrefix,
                       "Responses breakpoints become shared Engine part boundaries");
+    return failures;
+}
+
+int test_contiguous_assistant_items() {
+    const Json body = {
+        {"model", "m"},
+        {"input", Json::array({Json{{"id", "msg_user"},
+                                    {"type", "message"},
+                                    {"role", "user"},
+                                    {"content", "Inspect the file"}},
+                               Json{{"id", "msg_preamble"},
+                                    {"type", "message"},
+                                    {"role", "assistant"},
+                                    {"status", "incomplete"},
+                                    {"phase", "commentary"},
+                                    {"content", Json::array({Json{{"type", "output_text"},
+                                                                  {"text", "Let me check:"},
+                                                                  {"prompt_cache_breakpoint",
+                                                                   Json{{"mode", "explicit"}}}}})}},
+                               Json{{"id", "fc_read"},
+                                    {"type", "function_call"},
+                                    {"call_id", "call_read"},
+                                    {"name", "read_file"},
+                                    {"arguments", R"({"path":"a"})"}},
+                               Json{{"id", "fco_read"},
+                                    {"type", "function_call_output"},
+                                    {"call_id", "call_read"},
+                                    {"output", "contents"}},
+                               Json{{"id", "msg_continue"},
+                                    {"type", "message"},
+                                    {"role", "user"},
+                                    {"content", "Continue"}}})}};
+
+    const OpenAIResponsesCreateRequest request =
+        parse_openai_responses_create_request(body, limits());
+    int failures = 0;
+    failures += check(request.prompt.input_turns.size() == 4,
+                      "contiguous assistant message and call created an extra turn");
+    const ChatTurn& assistant = request.prompt.input_turns[1];
+    failures +=
+        check(assistant.role == ninfer::ChatRole::Assistant && assistant.content.size() == 1 &&
+                  assistant.content[0].text == "Let me check:" &&
+                  assistant.content[0].cache_boundary_after ==
+                      ninfer::PromptCacheMarkerKind::SharedStablePrefix &&
+                  assistant.tool_calls.size() == 1 && assistant.tool_calls[0].id == "call_read",
+              "assistant preamble, cache marker and function call were not coalesced");
+    failures += check(request.prompt.input_turns[2].role == ninfer::ChatRole::Tool &&
+                          request.prompt.input_turns[2].tool_call_id == "call_read",
+                      "function result did not end the assistant Item group");
+    failures += check(request.prompt.input_items.size() == 5 &&
+                          request.prompt.input_items[1].at("id") == "msg_preamble" &&
+                          request.prompt.input_items[1].at("phase") == "commentary" &&
+                          request.prompt.input_items[2].at("type") == "function_call",
+                      "semantic grouping changed canonical Responses Item order or metadata");
+
+    OpenAIResponsesStore store(8, 1ULL << 20);
+    const OpenAIResponsesResolvedPrompt resolved =
+        resolve_openai_responses_prompt(request.prompt, store, "resp_grouped", true);
+    failures += check(resolved.generation.messages.size() == 4 &&
+                          resolved.generation.messages[1].content.size() == 1 &&
+                          resolved.generation.messages[1].tool_calls.size() == 1,
+                      "call-graph normalization split the coalesced assistant turn");
+    return failures;
+}
+
+bool same_assistant_turn(const ChatTurn& left, const ChatTurn& right) {
+    if (left.role != ninfer::ChatRole::Assistant || right.role != ninfer::ChatRole::Assistant ||
+        left.reasoning_content != right.reasoning_content ||
+        left.content.size() != right.content.size() ||
+        left.tool_calls.size() != right.tool_calls.size()) {
+        return false;
+    }
+    for (std::size_t index = 0; index < left.content.size(); ++index) {
+        if (left.content[index].kind != right.content[index].kind ||
+            left.content[index].type_raw != right.content[index].type_raw ||
+            left.content[index].text != right.content[index].text ||
+            left.content[index].cache_boundary_after != right.content[index].cache_boundary_after) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < left.tool_calls.size(); ++index) {
+        if (left.tool_calls[index].id != right.tool_calls[index].id ||
+            left.tool_calls[index].name != right.tool_calls[index].name ||
+            left.tool_calls[index].arguments_json != right.tool_calls[index].arguments_json) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int test_response_output_history_round_trip() {
+    const OpenAIResponsesCreateRequest source = parse_openai_responses_create_request(
+        Json{{"model", "m"}, {"input", "Inspect both files"}, {"store", false}}, limits());
+    GenerationOutcome outcome;
+    outcome.reasoning     = "I should inspect both paths.";
+    outcome.text          = "Let me check:";
+    outcome.finish_reason = ninfer::FinishReason::StopToken;
+    outcome.tool_calls.push_back(
+        ninfer::GeneratedToolCall{.name = "read_file", .arguments_json = R"({"path":"a"})"});
+    outcome.tool_calls.push_back(
+        ninfer::GeneratedToolCall{.name = "read_file", .arguments_json = R"({"path":"b"})"});
+    const BuiltOpenAIResponse built =
+        make_openai_response_object("resp_round_trip", 1, source, {}, outcome);
+
+    Json input = Json::array(
+        {Json{{"type", "message"}, {"role", "user"}, {"content", "Inspect both files"}}});
+    for (const Json& item : built.output_items) { input.push_back(item); }
+    for (const Json& item : built.output_items) {
+        if (item.at("type") == "function_call") {
+            input.push_back(Json{{"type", "function_call_output"},
+                                 {"call_id", item.at("call_id")},
+                                 {"output", "contents"}});
+        }
+    }
+    input.push_back(Json{{"type", "message"}, {"role", "user"}, {"content", "Continue"}});
+    const OpenAIResponsesCreateRequest replay = parse_openai_responses_create_request(
+        Json{{"model", "m"}, {"input", std::move(input)}, {"store", false}}, limits());
+
+    int failures = 0;
+    failures +=
+        check(built.output_history.size() == 1 && replay.prompt.input_turns.size() == 5 &&
+                  same_assistant_turn(replay.prompt.input_turns[1], built.output_history[0]),
+              "Responses output Items did not round-trip to their stored assistant history");
+
+    GenerationOutcome incomplete;
+    incomplete.reasoning     = "unfinished reasoning";
+    incomplete.finish_reason = ninfer::FinishReason::OutputLimit;
+    const BuiltOpenAIResponse reasoning_only =
+        make_openai_response_object("resp_reasoning_only", 1, source, {}, incomplete);
+    const Json reasoning_replay = {
+        {"model", "m"},
+        {"input",
+         Json::array({Json{{"type", "message"}, {"role", "user"}, {"content", "Start"}},
+                      reasoning_only.output_items[0],
+                      Json{{"type", "message"}, {"role", "user"}, {"content", "Continue"}}})}};
+    const OpenAIResponsesCreateRequest parsed_reasoning =
+        parse_openai_responses_create_request(reasoning_replay, limits());
+    failures += check(reasoning_only.output_history.size() == 1 &&
+                          parsed_reasoning.prompt.input_turns.size() == 3 &&
+                          same_assistant_turn(parsed_reasoning.prompt.input_turns[1],
+                                              reasoning_only.output_history[0]),
+                      "reasoning-only incomplete output could not be replayed");
+    return failures;
+}
+
+int test_assistant_item_boundaries_and_errors() {
+    const Json first  = Json{{"type", "message"}, {"role", "assistant"}, {"content", "first "}};
+    const Json second = Json{{"type", "message"}, {"role", "assistant"}, {"content", "second"}};
+    const OpenAIResponsesCreateRequest grouped = parse_openai_responses_create_request(
+        Json{{"model", "m"},
+             {"input",
+              Json::array({first, second,
+                           Json{{"type", "message"}, {"role", "user"}, {"content", "boundary"}},
+                           first,
+                           Json{{"type", "message"}, {"role", "user"}, {"content", "done"}}})}},
+        limits());
+    int failures = 0;
+    failures += check(grouped.prompt.input_turns.size() == 4 &&
+                          grouped.prompt.input_turns[0].content.size() == 2 &&
+                          grouped.prompt.input_turns[0].content[0].text == "first " &&
+                          grouped.prompt.input_turns[0].content[1].text == "second" &&
+                          grouped.prompt.input_turns[2].content.size() == 1,
+                      "assistant content Items were not grouped or user boundary was ignored");
+
+    const Json reasoning =
+        Json{{"type", "reasoning"},
+             {"content", Json::array({Json{{"type", "reasoning_text"}, {"text", "thought"}}})}};
+    const Json call = Json{
+        {"type", "function_call"}, {"call_id", "call_1"}, {"name", "lookup"}, {"arguments", "{}"}};
+    const auto rejected = [&](Json input) {
+        return api_error([&] {
+            (void)parse_openai_responses_create_request(
+                Json{{"model", "m"}, {"input", std::move(input)}}, limits());
+        });
+    };
+    const ApiError reasoning_after_content = rejected(Json::array({first, reasoning}));
+    failures +=
+        check(reasoning_after_content.status == 400 &&
+                  reasoning_after_content.type == "invalid_request_error" &&
+                  reasoning_after_content.code == "invalid_assistant_history" &&
+                  reasoning_after_content.param == "input" &&
+                  reasoning_after_content.message.find(
+                      "reasoning cannot follow assistant message content") != std::string::npos,
+              "reasoning after assistant content did not fail precisely");
+    const ApiError content_after_call = rejected(Json::array({call, first}));
+    failures += check(content_after_call.code == "invalid_assistant_history" &&
+                          content_after_call.message.find(
+                              "assistant message content cannot follow function_call Items") !=
+                              std::string::npos,
+                      "assistant content after calls was silently reordered");
+    const ApiError duplicate_reasoning = rejected(Json::array({reasoning, reasoning}));
+    failures +=
+        check(duplicate_reasoning.code == "invalid_assistant_history" &&
+                  duplicate_reasoning.message.find(
+                      "reasoning cannot follow another reasoning Item") != std::string::npos,
+              "duplicate reasoning Items were silently overwritten");
     return failures;
 }
 
@@ -756,6 +961,9 @@ int main() {
     failures += test_basic_request_and_resolution();
     failures += test_budgets_and_nonsemantic_hints();
     failures += test_typed_items_and_cache_markers();
+    failures += test_contiguous_assistant_items();
+    failures += test_response_output_history_round_trip();
+    failures += test_assistant_item_boundaries_and_errors();
     failures += test_tools_and_effective_subset();
     failures += test_namespace_tools();
     failures += test_explicit_rejections();
