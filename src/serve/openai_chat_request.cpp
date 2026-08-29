@@ -430,11 +430,14 @@ std::optional<std::string> parse_assistant_reasoning(const Json& message, std::s
     return reasoning ? reasoning : content;
 }
 
-void validate_message_name(const Json& item, bool legacy_function) {
+void validate_message_name(const Json& item, bool legacy_function, ChatRole role) {
     if (!item.contains("name") || item.at("name").is_null()) { return; }
     if (!item.at("name").is_string()) { bad_request("message name must be a string", "messages"); }
     const std::string name = item.at("name").get<std::string>();
-    if (!name.empty() && !legacy_function) {
+    // OpenAI permits a non-empty name on tool messages (the tool identifier, redundant
+    // with tool_call_id). On every other role it would change participant identity, which
+    // the chat template cannot represent.
+    if (!name.empty() && !legacy_function && role != ChatRole::Tool) {
         bad_request("a non-empty message name changes participant identity, which NInfer's chat "
                     "template cannot represent",
                     "messages", "message_name_not_supported");
@@ -557,7 +560,7 @@ ChatTurn parse_message(const Json& item, std::size_t index) {
     const bool legacy_function  = role_name == "function";
     const ChatRole role         = legacy_function ? ChatRole::Tool : parse_message_role(role_name);
 
-    validate_message_name(item, legacy_function);
+    validate_message_name(item, legacy_function, role);
     if (legacy_function) { (void)require_function_name(item, "messages"); }
     validate_non_assistant_fields(item, role);
 
