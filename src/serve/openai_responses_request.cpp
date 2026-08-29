@@ -3,7 +3,9 @@
 #include "serve/request_validation.h"
 
 #include <algorithm>
+#include <iterator>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -545,6 +547,76 @@ ChatTurn parse_function_call_output_item(
     return turn;
 }
 
+enum class AssistantInputPhase {
+    Empty,
+    Reasoning,
+    Content,
+    Calls,
+};
+
+[[noreturn]] void invalid_assistant_history(std::size_t index, std::string message) {
+    bad_request("input Item " + std::to_string(index) + " " + std::move(message) +
+                    "; supported assistant Item order is reasoning, message content, then "
+                    "function calls",
+                "input", "invalid_assistant_history");
+}
+
+struct AssistantInputRun {
+    AssistantInputRun() { reset(); }
+
+    void append_reasoning(std::string reasoning, std::size_t index) {
+        switch (phase) {
+        case AssistantInputPhase::Empty:
+            turn.reasoning_content = std::move(reasoning);
+            phase                  = AssistantInputPhase::Reasoning;
+            return;
+        case AssistantInputPhase::Reasoning:
+            invalid_assistant_history(index, "reasoning cannot follow another reasoning Item");
+        case AssistantInputPhase::Content:
+            invalid_assistant_history(index, "reasoning cannot follow assistant message content");
+        case AssistantInputPhase::Calls:
+            invalid_assistant_history(index, "reasoning cannot follow function_call Items");
+        }
+        throw std::logic_error("unreachable assistant input phase");
+    }
+
+    void append_message(ChatTurn message, std::size_t index) {
+        if (message.role != ChatRole::Assistant) {
+            throw std::logic_error("assistant input run received a non-assistant message");
+        }
+        if (phase == AssistantInputPhase::Calls) {
+            invalid_assistant_history(
+                index, "assistant message content cannot follow function_call Items");
+        }
+        turn.content.insert(turn.content.end(), std::make_move_iterator(message.content.begin()),
+                            std::make_move_iterator(message.content.end()));
+        phase = AssistantInputPhase::Content;
+    }
+
+    void append_call(ToolCall call) {
+        turn.tool_calls.push_back(std::move(call));
+        phase = AssistantInputPhase::Calls;
+    }
+
+    void flush(std::vector<ChatTurn>& turns) {
+        if (phase == AssistantInputPhase::Empty) { return; }
+        if (!turn.reasoning_content.empty() || !turn.content.empty() || !turn.tool_calls.empty()) {
+            turns.push_back(std::move(turn));
+        }
+        reset();
+    }
+
+private:
+    void reset() {
+        turn      = ChatTurn{};
+        turn.role = ChatRole::Assistant;
+        phase     = AssistantInputPhase::Empty;
+    }
+
+    ChatTurn turn;
+    AssistantInputPhase phase = AssistantInputPhase::Empty;
+};
+
 void parse_input(const Json& input, OpenAIResponsesPromptRequest& out,
                  std::unordered_map<std::string, OpenAIResponsesFunctionIdentity>& identities) {
     Json values;
@@ -556,10 +628,8 @@ void parse_input(const Json& input, OpenAIResponsesPromptRequest& out,
         bad_request("input must be a string or an array of Items", "input");
     }
 
-    std::string pending_reasoning;
-    bool pending_reasoning_present = false;
-    bool can_group_function_calls  = false;
-    std::size_t breakpoint_count   = 0;
+    AssistantInputRun assistant;
+    std::size_t breakpoint_count = 0;
     std::unordered_set<std::string> item_ids;
     for (std::size_t index = 0; index < values.size(); ++index) {
         const Json& item = values.at(index);
@@ -581,50 +651,22 @@ void parse_input(const Json& input, OpenAIResponsesPromptRequest& out,
         Json canonical;
         if (type == "message") {
             ParsedMessage message = parse_message_item(item, index, breakpoint_count);
-            if (pending_reasoning_present) {
-                if (message.turn.role != ChatRole::Assistant) {
-                    bad_request("a reasoning Item must be followed by an assistant output Item",
-                                "input");
-                }
-                message.turn.reasoning_content = std::move(pending_reasoning);
-                pending_reasoning.clear();
-                pending_reasoning_present = false;
-            }
-            out.input_turns.push_back(std::move(message.turn));
-            canonical                = std::move(message.canonical);
-            can_group_function_calls = false;
-        } else if (type == "reasoning") {
-            if (pending_reasoning_present) {
-                bad_request("adjacent reasoning Items are not supported", "input");
-            }
-            pending_reasoning         = parse_reasoning_item(item, canonical);
-            pending_reasoning_present = true;
-            can_group_function_calls  = false;
-        } else if (type == "function_call") {
-            ToolCall call = parse_function_call_item(item, canonical, identities);
-            if (can_group_function_calls && !pending_reasoning_present &&
-                !out.input_turns.empty() && out.input_turns.back().role == ChatRole::Assistant &&
-                out.input_turns.back().content.empty() &&
-                !out.input_turns.back().tool_calls.empty()) {
-                out.input_turns.back().tool_calls.push_back(std::move(call));
+            canonical             = std::move(message.canonical);
+            if (message.turn.role == ChatRole::Assistant) {
+                assistant.append_message(std::move(message.turn), index);
             } else {
-                ChatTurn turn;
-                turn.role              = ChatRole::Assistant;
-                turn.reasoning_content = std::move(pending_reasoning);
-                pending_reasoning.clear();
-                pending_reasoning_present = false;
-                turn.tool_calls.push_back(std::move(call));
-                out.input_turns.push_back(std::move(turn));
+                assistant.flush(out.input_turns);
+                out.input_turns.push_back(std::move(message.turn));
             }
-            can_group_function_calls = true;
+        } else if (type == "reasoning") {
+            assistant.append_reasoning(parse_reasoning_item(item, canonical), index);
+        } else if (type == "function_call") {
+            assistant.append_call(parse_function_call_item(item, canonical, identities));
         } else if (type == "function_call_output") {
-            if (pending_reasoning_present) {
-                bad_request("a reasoning Item must be followed by an assistant output Item",
-                            "input");
-            }
-            out.input_turns.push_back(
-                parse_function_call_output_item(item, canonical, breakpoint_count, identities));
-            can_group_function_calls = false;
+            ChatTurn result =
+                parse_function_call_output_item(item, canonical, breakpoint_count, identities);
+            assistant.flush(out.input_turns);
+            out.input_turns.push_back(std::move(result));
         } else if (type == "input_file") {
             bad_request("input_file requires a Files API, which NInfer does not provide", "input",
                         "file_inputs_not_supported");
@@ -636,9 +678,7 @@ void parse_input(const Json& input, OpenAIResponsesPromptRequest& out,
         if (!item_ids.insert(id).second) { bad_request("duplicate input Item id: " + id, "input"); }
         out.input_items.push_back(std::move(canonical));
     }
-    if (pending_reasoning_present) {
-        bad_request("a reasoning Item must be followed by an assistant output Item", "input");
-    }
+    assistant.flush(out.input_turns);
 }
 
 struct ParsedPromptFields {

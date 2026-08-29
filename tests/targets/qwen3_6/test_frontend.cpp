@@ -612,6 +612,18 @@ int test_official_chat_template() {
                           "</function>\n</tool_call><|im_end|>\n",
                       "nested or boolean tool arguments differ from official JSON rendering");
 
+    fi::ChatMessage preamble   = chat_message(ninfer::ChatRole::Assistant, "Let me check:");
+    preamble.reasoning_content = "I should inspect.";
+    preamble.tool_calls.push_back(
+        {.id = "call_read", .name = "read_file", .arguments_json = R"({"path":"a"})"});
+    failures += check(render_chat_text({chat_message(ninfer::ChatRole::User, "inspect"), preamble},
+                                       no_generation) ==
+                          "<|im_start|>user\ninspect<|im_end|>\n"
+                          "<|im_start|>assistant\n<think>\nI should inspect.\n</think>\n\n"
+                          "Let me check:\n\n<tool_call>\n<function=read_file>\n<parameter=path>\n"
+                          "a\n</parameter>\n</function>\n</tool_call><|im_end|>\n",
+                      "assistant reasoning, preamble and tool call did not share one exact turn");
+
     fi::ChatRenderOptions no_thinking;
     no_thinking.enable_thinking = false;
     failures +=
