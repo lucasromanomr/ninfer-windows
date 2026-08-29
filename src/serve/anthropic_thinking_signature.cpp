@@ -1,6 +1,14 @@
 #include "serve/anthropic_thinking_signature.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <wincrypt.h>
+#else
 #include <sys/random.h>
+#endif
 
 #include <array>
 #include <bit>
@@ -189,6 +197,18 @@ AnthropicThinkingSigner::Key random_key() {
     AnthropicThinkingSigner::Key key{};
     std::size_t offset = 0;
     while (offset < key.size()) {
+#ifdef _WIN32
+        HCRYPTPROV handle = 0;
+        if (!::CryptAcquireContext(
+                &handle, nullptr, nullptr, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT) ||
+            !::CryptGenRandom(handle, static_cast<DWORD>(key.size() - offset), key.data() + offset)) {
+            if (handle != 0) { ::CryptReleaseContext(handle, 0); }
+            throw std::system_error(::GetLastError(), std::generic_category(),
+                                    "failed to initialize Anthropic Thinking signer");
+        }
+        ::CryptReleaseContext(handle, 0);
+        offset = key.size();
+#else
         const ssize_t count = ::getrandom(key.data() + offset, key.size() - offset, 0);
         if (count < 0) {
             if (errno == EINTR) { continue; }
@@ -199,6 +219,7 @@ AnthropicThinkingSigner::Key random_key() {
             throw std::runtime_error("operating-system random source returned no key bytes");
         }
         offset += static_cast<std::size_t>(count);
+#endif
     }
     return key;
 }

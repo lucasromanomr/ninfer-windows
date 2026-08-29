@@ -366,6 +366,6 @@ if(NINFER_BUILD_SERVE)
     PUBLIC ninfer_engine Threads::Threads
     PRIVATE ninfer_media_acquire ${NINFER_CUDART_TARGET})
   if(WIN32)
-    target_link_libraries(ninfer_serve PRIVATE winhttp)
+    target_link_libraries(ninfer_serve PRIVATE winhttp advapi32)
   endif()
 endif()
