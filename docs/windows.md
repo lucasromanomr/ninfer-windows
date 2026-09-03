@@ -116,6 +116,12 @@ certificate:
 .\apps\ninfer-control\build-release.ps1
 ```
 
+It bundles the server too, through the `NInferServerDirectory` property: an MSIX is a signed
+container, so the binaries enter during packaging rather than being copied in afterwards, and they
+land next to `NInferControl.exe` in the install folder. The script takes the same
+`-SkipServerBuild`, `-ServerBuildDirectory`, `-VcpkgRoot`, and `-CudaRoot` switches as the portable
+one.
+
 The resulting package is under `dist\ninfer-control-release\`. Distribute
 `dist\NInferControl-Control-Release-x64.zip`; after extracting it, run
 `Install-Release.ps1`. It requests administrator permission, trusts the local

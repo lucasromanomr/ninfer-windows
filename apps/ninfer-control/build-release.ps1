@@ -1,11 +1,17 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\dist\ninfer-control-release')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\dist\ninfer-control-release'),
+    [string]$ServerBuildDirectory = (Join-Path $PSScriptRoot '..\..\build-ninja'),
+    [string]$VcpkgRoot = 'C:\src\vcpkg',
+    [string]$CudaRoot = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3',
+    [switch]$SkipServerBuild
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'build-common.ps1')
 
 $projectPath = Join-Path $PSScriptRoot 'NInferControl.csproj'
+$serverBuildPath = [System.IO.Path]::GetFullPath($ServerBuildDirectory)
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $outputPath = [System.IO.Path]::GetFullPath($OutputDirectory)
 $zipPath = Join-Path (Split-Path $outputPath -Parent) 'NInferControl-Control-Release-x64.zip'
@@ -43,15 +49,30 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw '.NET SDK não encontrado.'
 }
 
+if ($SkipServerBuild) {
+    Write-Host 'Compilação do servidor nativo ignorada (-SkipServerBuild).'
+}
+else {
+    Write-Host "Compilando o servidor nativo em $serverBuildPath..."
+    Build-NativeServer -RepositoryRoot $repositoryRoot -ServerBuildPath $serverBuildPath -VcpkgRoot $VcpkgRoot -CudaRoot $CudaRoot
+}
+
+$serverReleasePath = Resolve-ServerReleaseDirectory -ServerBuildPath $serverBuildPath
+
 $signTool = Get-SignToolPath
 $signingCertificate = New-ReleaseSigningCertificate
+
+Assert-NInferControlNotRunning -Path $outputPath
 
 if (Test-Path -LiteralPath $outputPath) {
     Remove-Item -LiteralPath $outputPath -Recurse -Force
 }
 New-Item -ItemType Directory -Path $outputPath | Out-Null
 
-& dotnet publish $projectPath -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true "-p:AppxPackageDir=$outputPath\"
+# NInferServerDirectory makes the csproj carry the server binaries into the MSIX, beside
+# NInferControl.exe. An MSIX is a signed container, so they cannot be copied in afterwards.
+& dotnet publish $projectPath -c Release -p:Platform=x64 -p:GenerateAppxPackageOnBuild=true `
+    "-p:NInferServerDirectory=$serverReleasePath" "-p:AppxPackageDir=$outputPath\"
 if ($LASTEXITCODE -ne 0) {
     throw "A publicação Release falhou com código $LASTEXITCODE."
 }
@@ -159,3 +180,4 @@ Compress-Archive -Path (Join-Path $packageDirectory.FullName '*') -DestinationPa
 Write-Host "MSIX: $($msix.FullName)"
 Write-Host "Instalador: $installerPath"
 Write-Host "ZIP: $zipPath"
+Write-Host "Servidor incluído no pacote a partir de $serverReleasePath."
