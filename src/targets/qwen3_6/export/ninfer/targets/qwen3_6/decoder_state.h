@@ -17,6 +17,7 @@ struct DecoderStateSpec {
     std::uint32_t mtp_layers                = 0;
     std::uint32_t capacity                  = 0;
     std::int32_t kv_heads                   = 0;
+    std::int32_t attention_head_dim         = 0;
     KvCacheStorage kv_storage               = KvCacheStorage::BFloat16;
     bool enable_mtp                         = false;
     std::int32_t kv_table_rows              = 1;
@@ -29,6 +30,7 @@ struct PagedKVCacheLayout {
     KVExecutionTableLayout execution_tables;
     std::uint32_t layers      = 0;
     std::uint32_t max_context = 0;
+    std::int32_t kv_heads     = 0;
     PagedKVStorageLayout layer_storage;
 
     [[nodiscard]] std::size_t payload_bytes() const noexcept { return pages.payload_bytes(); }
@@ -88,6 +90,7 @@ private:
     KVExecutionTablePool execution_tables_;
     std::uint32_t layers_      = 0;
     std::uint32_t max_context_ = 0;
+    std::int32_t kv_heads_     = 0;
     PagedKVStorageLayout layer_storage_;
 };
 
