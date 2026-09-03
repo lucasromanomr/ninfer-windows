@@ -49,22 +49,23 @@ add_library(ninfer_artifact STATIC
 ninfer_internal_includes(ninfer_artifact)
 target_link_libraries(ninfer_artifact PUBLIC ninfer_core)
 
-# The warp-specialized SM120 kernel uses setmaxnreg to transfer registers from its
-# producer warpgroup to its consumer warpgroups. Relocatable device code makes ptxas
-# discard that contract, so this self-contained kernel is intentionally compiled in a
-# non-RDC archive and called through a host launcher from ninfer_ops.
-add_library(ninfer_nvfp4_tma STATIC
+# Warp-specialized SM120 NVFP4 kernels use setmaxnreg to transfer registers from producer
+# warpgroups to consumer warpgroups. Relocatable device code makes ptxas discard that contract, so
+# these self-contained kernels are intentionally compiled in a non-RDC archive and called through
+# host launchers from ninfer_ops.
+add_library(ninfer_nvfp4_non_rdc STATIC
   ops/linear/nvfp4/nvfp4_w4a4_tma.cu
-  ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_w4a4_tma.cu)
-ninfer_internal_includes(ninfer_nvfp4_tma)
-set_target_properties(ninfer_nvfp4_tma PROPERTIES
+  ops/linear_swiglu/nvfp4/nvfp4_linear_swiglu_w4a4_tma.cu
+  ops/softmax_attention/dense/causal_cache/prompt_nvfp4_non_rdc.cu)
+ninfer_internal_includes(ninfer_nvfp4_non_rdc)
+set_target_properties(ninfer_nvfp4_non_rdc PROPERTIES
   CUDA_SEPARABLE_COMPILATION OFF
   CUDA_RESOLVE_DEVICE_SYMBOLS OFF)
 if(WIN32)
-  set_target_properties(ninfer_nvfp4_tma PROPERTIES CUDA_RUNTIME_LIBRARY Static)
+  set_target_properties(ninfer_nvfp4_non_rdc PROPERTIES CUDA_RUNTIME_LIBRARY Static)
 endif()
-target_compile_options(ninfer_nvfp4_tma PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
-target_link_libraries(ninfer_nvfp4_tma PRIVATE ninfer_core ${NINFER_CUDART_TARGET} CUDA::cuda_driver)
+target_compile_options(ninfer_nvfp4_non_rdc PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+target_link_libraries(ninfer_nvfp4_non_rdc PRIVATE ninfer_core ${NINFER_CUDART_TARGET} CUDA::cuda_driver)
 
 # Shared mathematical Ops. The list is intentionally explicit: adding a
 # source is a build-boundary decision, not an accidental recursive-glob side effect.
@@ -92,13 +93,18 @@ add_library(ninfer_ops STATIC
   ops/launcher/scatter.cu
   ops/launcher/sigmoid_gate_mul.cu
   ops/launcher/silu_and_mul.cu
+  ops/launcher/target_logprobs.cu
   ops/launcher/vision_pos_embed.cu
   # Softmax Attention and KV-cache state transitions.
   ops/softmax_attention/dense/causal_cache/causal_softmax_attention.cpp
   ops/softmax_attention/dense/causal_cache/small_t.cu
   ops/softmax_attention/dense/causal_cache/small_t_fp8.cu
+  ops/softmax_attention/dense/causal_cache/small_t_nvfp4.cu
+  ops/softmax_attention/dense/causal_cache/small_t_k8v4.cu
   ops/softmax_attention/dense/causal_cache/prompt.cu
   ops/softmax_attention/dense/causal_cache/prompt_fp8.cu
+  ops/softmax_attention/dense/causal_cache/prompt_nvfp4.cu
+  ops/softmax_attention/dense/causal_cache/prompt_k8v4.cu
   ops/softmax_attention/dense/packed/packed_softmax_attention.cpp
   ops/softmax_attention/dense/packed/launch.cu
   ops/softmax_attention/dense/context/context_softmax_attention.cpp
@@ -107,6 +113,8 @@ add_library(ninfer_ops STATIC
   ops/softmax_attention/sliding_window/launch.cu
   ops/kv_cache/append/kv_cache_append.cpp
   ops/kv_cache/append/launch.cu
+  ops/kv_cache/append/nvfp4_launch.cu
+  ops/kv_cache/append/k8v4_launch.cu
   # Gated DeltaNet Linear Attention core.
   ops/linear_attention/gated_delta_net/gated_delta_net.cpp
   ops/linear_attention/gated_delta_net/replay.cpp
@@ -167,7 +175,8 @@ add_library(ninfer_ops STATIC
   ops/linear/fp8/fp8_format.cpp
   ops/linear/fp8/fp8_gemv.cu
   ops/linear/fp8/fp8_small_t.cu
-  ops/linear/fp8/fp8_a16_mma.cu
+  ops/linear/fp8/fp8_a16_small_t_mma.cu
+  ops/linear/fp8/fp8_a16_gemm_mma.cu
   ops/linear/fp8/fp8_a8.cu
   ops/linear/fp8/fp8_dispatch.cpp
   ops/linear/nvfp4/nvfp4_format.cpp
@@ -270,10 +279,11 @@ add_library(ninfer_ops STATIC
   ops/wrapper/sigmoid_mul.cpp
   ops/wrapper/silu_mul.cpp
   ops/wrapper/sparse_moe.cpp
+  ops/wrapper/target_logprobs.cpp
   ops/wrapper/vision_pos_embed.cpp)
 ninfer_internal_includes(ninfer_ops)
 ninfer_cuda_archive(ninfer_ops)
-target_link_libraries(ninfer_ops PUBLIC ninfer_core PRIVATE ninfer_nvfp4_tma)
+target_link_libraries(ninfer_ops PUBLIC ninfer_core PRIVATE ninfer_nvfp4_non_rdc)
 
 # Product-independent text and media mechanisms.
 add_library(ninfer_text STATIC
@@ -307,9 +317,12 @@ if(NINFER_BUILD_PROMPT_INPUT)
 endif()
 
 if(NINFER_BUILD_APPS OR BUILD_TESTING)
-  add_library(ninfer_product_load_progress STATIC
-    product/load_progress/load_progress.cpp)
-  ninfer_internal_includes(ninfer_product_load_progress)
+  add_library(ninfer_product_logging STATIC
+    product/logging/logging.cpp
+    product/logging/pretty_format.cpp
+    product/logging/startup_log.cpp)
+  ninfer_internal_includes(ninfer_product_logging)
+  target_link_libraries(ninfer_product_logging PUBLIC spdlog::spdlog)
 endif()
 
 # One cold closed registry plus the opaque public product Engine. Family and exact-target
@@ -352,8 +365,9 @@ if(NINFER_BUILD_SERVE)
     serve/anthropic_messages_http.cpp
     serve/openai_responses_store.cpp
     serve/translate.cpp
-    serve/console_log.cpp
     serve/generation_service.cpp
+    serve/request_events.cpp
+    serve/operational_log.cpp
     serve/request_log.cpp
     serve/http_server.cpp
     serve/openai_responses_http.cpp
@@ -364,7 +378,7 @@ if(NINFER_BUILD_SERVE)
     ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
   target_link_libraries(ninfer_serve
     PUBLIC ninfer_engine Threads::Threads
-    PRIVATE ninfer_media_acquire ${NINFER_CUDART_TARGET})
+    PRIVATE ninfer_media_acquire ninfer_product_logging ${NINFER_CUDART_TARGET})
   if(WIN32)
     target_link_libraries(ninfer_serve PRIVATE winhttp advapi32)
   endif()

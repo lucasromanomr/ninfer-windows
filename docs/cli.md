@@ -20,9 +20,14 @@ The examples use Qwen3.8-27B NVFP4 with FP8 KV storage.
 Exactly one of `--prompt` and `--messages` is required. The CLI normally omits `--kv-capacity`, so
 the shared Main Text KV pool follows the example's 32,768-token `--max-context`.
 
-Answer content is streamed to stdout. Reasoning, model loading (including the registered target and
-canonical `weights_id`), timings, throughput, GPU memory, and speculative-decoding statistics are
-written to stderr, so stdout can be redirected independently:
+Answer content is streamed to stdout. Human-readable startup milestones and runtime errors are
+written to stderr without service timestamps. Reasoning and the CLI result report (timings,
+throughput, GPU memory, token IDs when requested, and speculative-decoding statistics) also use
+stderr as unprefixed product output, so stdout can be redirected independently. On a terminal,
+weight materialization is one transient progress line followed by a compact Engine-ready summary.
+Redirected stderr contains persistent readable progress for long loads and no carriage returns or
+ANSI escapes. `--log-level debug` exposes every startup phase. Option and local prompt/message input
+failures remain direct command diagnostics:
 
 ```bash
 ./build/apps/ninfer models/qwen3_8_27b_nvfp4.ninfer \
@@ -188,7 +193,7 @@ The table lists executable defaults. The examples above select FP8 KV and MTP3.
 | `--prefill-chunk N` | positive text-prefill chunk, in multiples of 128 | `1024` |
 | `--max-new N` | requested output-token limit | `128` |
 | `--device N` | CUDA device index | `0` |
-| `--kv-dtype bf16\|int8\|fp8` | KV-cache storage | `bf16` |
+| `--kv-dtype bf16\|int8\|fp8\|nvfp4\|k8v4` | KV-cache storage | `bf16` |
 | `--spec mtp\|dflash` | speculative backend | off |
 | `--draft-tokens N` | MTP `1..5`; DFlash `1..15` | unset |
 | `--lm-head-draft` | optimized proposal head | off |
@@ -231,8 +236,7 @@ Run `./build/apps/ninfer --help` for the exact option contract.
 
 The registered model IDs have a native context limit of 262,144 tokens. The practical allocation
 on one RTX 5090 depends on the selected artifact, media workload, output budget, and KV-cache type.
-The compact large-context profile uses `--kv-dtype fp8`, which selects row-scaled E4M3 D256 KV
-storage. INT8 group-64 and BF16 are also available. Artifact identity selects the weight profile;
+Artifact identity selects the weight profile;
 `--kv-dtype` selects runtime KV storage. The prepared prompt must fit
 `--max-context`; generation stops at the remaining context capacity when necessary.
 `--kv-capacity N` controls the shared physical Main Text KV pool independently and is rounded up to

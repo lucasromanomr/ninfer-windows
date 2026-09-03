@@ -674,26 +674,39 @@ DecoderState terminal_state(DecoderState state) {
     return state;
 }
 
-std::optional<std::uint32_t> automatic_stable_boundary(std::span<const ChatRole> roles,
-                                                       bool has_tools) {
+std::optional<std::uint32_t> leading_instruction_boundary(std::span<const ChatRole> roles) {
     std::uint32_t leading = 0;
     while (leading < roles.size() &&
            (roles[leading] == ChatRole::System || roles[leading] == ChatRole::Developer)) {
         ++leading;
     }
-    return has_tools || leading != 0 ? std::optional<std::uint32_t>(leading) : std::nullopt;
+    return leading != 0 ? std::optional<std::uint32_t>(leading) : std::nullopt;
 }
 
-PreparedContextCache
-prepare_context_cache(ContextCacheHints hints, std::size_t message_count,
-                      std::span<const std::optional<std::uint32_t>> message_boundaries,
-                      std::span<const std::optional<std::uint32_t>> cache_boundaries,
-                      std::optional<std::uint32_t> automatic_boundary,
-                      std::uint32_t maximum_markers) {
-    if (hints.markers.size() > maximum_markers) {
-        throw std::invalid_argument("context cache marker count exceeds Engine capacity");
+bool exact_vision_frontier(std::uint32_t frontier, std::span<const VisionItem> items) {
+    for (const VisionItem& item : items) {
+        if (item.token_spans.empty()) { return false; }
+        const TokenSpan& first = item.token_spans.front();
+        const TokenSpan& last  = item.token_spans.back();
+        if (last.count > std::numeric_limits<std::size_t>::max() - last.begin) { return false; }
+        const std::size_t end = last.begin + last.count;
+        if (first.begin < frontier && frontier < end) { return false; }
     }
-    if (cache_boundaries.size() != hints.markers.size()) {
+    return true;
+}
+
+PreparedContextCache prepare_context_cache(
+    ContextCacheHints hints, std::size_t message_count,
+    std::span<const std::optional<std::uint32_t>> message_boundaries,
+    std::span<const PromptCacheMarker> rendered_markers,
+    std::span<const std::optional<std::uint32_t>> cache_boundaries,
+    std::span<const VisionItem> vision_items, std::optional<std::size_t> engine_tool_marker_index,
+    std::optional<std::uint32_t> leading_boundary, std::uint32_t full_prompt_frontier) {
+    constexpr std::size_t kMaximumExplicitMarkers = 4U;
+    if (hints.markers.size() > kMaximumExplicitMarkers) {
+        throw std::invalid_argument("PromptInput supports at most four explicit cache markers");
+    }
+    if (cache_boundaries.size() != rendered_markers.size()) {
         throw std::logic_error("rendered cache marker count changed during preparation");
     }
 
@@ -726,9 +739,6 @@ prepare_context_cache(ContextCacheHints hints, std::size_t message_count,
     }
     out.update_session_index = hints.update_session_index;
 
-    std::vector<PromptCacheMarker> markers;
-    markers.reserve(hints.markers.size() +
-                    static_cast<std::size_t>(automatic_boundary.has_value()));
     for (const PromptCacheMarker marker : hints.markers) {
         switch (marker.kind) {
         case PromptCacheMarkerKind::SharedStablePrefix:
@@ -767,62 +777,61 @@ prepare_context_cache(ContextCacheHints hints, std::size_t message_count,
         default:
             throw std::invalid_argument("context cache marker location is invalid");
         }
-        if (std::find(markers.begin(), markers.end(), marker) == markers.end()) {
-            markers.push_back(marker);
-        }
-    }
-    const bool has_explicit_shared =
-        std::any_of(markers.begin(), markers.end(), [](const PromptCacheMarker& marker) {
-            return marker.kind == PromptCacheMarkerKind::SharedStablePrefix;
-        });
-    if (automatic_boundary && !has_explicit_shared && markers.size() < maximum_markers) {
-        const PromptCacheMarker automatic{.after_message_count = *automatic_boundary,
-                                          .kind = PromptCacheMarkerKind::SharedStablePrefix};
-        if (std::find(markers.begin(), markers.end(), automatic) == markers.end()) {
-            markers.push_back(automatic);
+        if (marker.kind == PromptCacheMarkerKind::SharedStablePrefix &&
+            marker.evidence == SharedCandidateEvidence::None) {
+            throw std::invalid_argument("shared context cache marker evidence is empty");
         }
     }
 
-    out.opportunities.reserve(markers.size());
-    for (std::size_t index = 0; index < markers.size(); ++index) {
-        const PromptCacheMarker marker = markers[index];
-        const bool automatic =
-            std::find(hints.markers.begin(), hints.markers.end(), marker) == hints.markers.end();
+    out.opportunities.reserve(7U);
+    const auto add_opportunity = [&](PromptCacheMarkerKind kind, SharedCandidateEvidence evidence,
+                                     std::uint32_t frontier, std::uint32_t input_order) {
+        if (frontier == 0 || !exact_vision_frontier(frontier, vision_items)) { return; }
+        const auto duplicate = std::find_if(
+            out.opportunities.begin(), out.opportunities.end(), [&](const auto& existing) {
+                return existing.kind == kind && existing.frontier == frontier;
+            });
+        if (duplicate == out.opportunities.end()) {
+            out.opportunities.push_back(PreparedCacheOpportunity{.kind        = kind,
+                                                                 .evidence    = evidence,
+                                                                 .frontier    = frontier,
+                                                                 .input_order = input_order});
+        } else if (kind == PromptCacheMarkerKind::SharedStablePrefix) {
+            duplicate->evidence |= evidence;
+        }
+    };
+
+    for (std::size_t index = 0; index < hints.markers.size(); ++index) {
+        const PromptCacheMarker marker = hints.markers[index];
         std::optional<std::uint32_t> resolved;
         if (marker.location == PromptCacheMarkerLocation::MessageBoundary) {
             if (marker.after_message_count < message_boundaries.size()) {
                 resolved = message_boundaries[marker.after_message_count];
             }
         } else {
-            const auto original = std::find(hints.markers.begin(), hints.markers.end(), marker);
-            if (original != hints.markers.end()) {
-                const std::size_t original_index =
-                    static_cast<std::size_t>(std::distance(hints.markers.begin(), original));
-                if (original_index < cache_boundaries.size()) {
-                    resolved = cache_boundaries[original_index];
-                }
-            }
+            if (index < cache_boundaries.size()) { resolved = cache_boundaries[index]; }
         }
-        if (!resolved) {
-            if (automatic) { continue; }
-            throw std::invalid_argument(
-                "context cache marker is not an exact serialized token boundary");
+        if (!resolved) { continue; }
+        add_opportunity(marker.kind, marker.evidence, *resolved, static_cast<std::uint32_t>(index));
+    }
+
+    std::uint32_t engine_order = static_cast<std::uint32_t>(hints.markers.size());
+    if (hints.allow_engine_automatic_shared_prefixes) {
+        if (engine_tool_marker_index && *engine_tool_marker_index < cache_boundaries.size() &&
+            cache_boundaries[*engine_tool_marker_index]) {
+            add_opportunity(PromptCacheMarkerKind::SharedStablePrefix,
+                            SharedCandidateEvidence::EngineStructural,
+                            *cache_boundaries[*engine_tool_marker_index], engine_order++);
         }
-        const std::uint32_t frontier = *resolved;
-        if (frontier == 0) {
-            if (automatic) { continue; }
-            throw std::invalid_argument("context cache marker has an empty token prefix");
+        if (leading_boundary && *leading_boundary < message_boundaries.size() &&
+            message_boundaries[*leading_boundary]) {
+            add_opportunity(PromptCacheMarkerKind::SharedStablePrefix,
+                            SharedCandidateEvidence::EngineStructural,
+                            *message_boundaries[*leading_boundary], engine_order++);
         }
-        const auto duplicate = std::find_if(
-            out.opportunities.begin(), out.opportunities.end(), [&](const auto& existing) {
-                return existing.kind == marker.kind && existing.frontier == frontier;
-            });
-        if (duplicate == out.opportunities.end()) {
-            out.opportunities.push_back(
-                PreparedCacheOpportunity{.kind        = marker.kind,
-                                         .frontier    = frontier,
-                                         .input_order = static_cast<std::uint32_t>(index)});
-        }
+        add_opportunity(PromptCacheMarkerKind::SharedStablePrefix,
+                        SharedCandidateEvidence::EngineObserved, full_prompt_frontier,
+                        engine_order);
     }
     return out;
 }
@@ -838,8 +847,7 @@ public:
                                      .tokenizer_config_json  = resources.tokenizer_config_json,
                                      .generation_config_json = resources.generation_config_json})),
           processor(processor_options(resources)), vision_enabled(options.vision_enabled),
-          max_context(options.max_context),
-          max_cache_markers_per_request(options.max_cache_markers_per_request) {
+          max_context(options.max_context) {
         if (options.max_context == 0) {
             throw std::invalid_argument("frontend max_context must be nonzero");
         }
@@ -898,9 +906,8 @@ public:
     std::shared_ptr<fi::MediaPreprocessCache> media_cache;
     StopPolicy defaults;
     std::shared_ptr<const std::vector<TokenId>> thinking_control_tokens;
-    bool vision_enabled                         = true;
-    std::uint32_t max_context                   = 0;
-    std::uint32_t max_cache_markers_per_request = 0;
+    bool vision_enabled       = true;
+    std::uint32_t max_context = 0;
 };
 
 class OutputSession::Impl {
@@ -1311,16 +1318,27 @@ PreparedPrompt Frontend::prepare(PromptInput input, const PreparationControl& co
     const auto start              = Clock::now();
     const PromptOptions options   = input.options;
     ContextCacheHints cache_hints = std::move(input.context_cache);
-    if (cache_hints.markers.size() > impl_->max_cache_markers_per_request) {
-        throw std::invalid_argument("context cache marker count exceeds Engine capacity");
+    if (cache_hints.markers.size() > 4U) {
+        throw std::invalid_argument("PromptInput supports at most four explicit cache markers");
     }
     std::vector<ChatRole> message_roles;
     message_roles.reserve(input.messages.size());
     for (const ChatMessage& message : input.messages) { message_roles.push_back(message.role); }
     const auto tool_call_output =
         fi::build_tool_call_output_contract(options.tool_jsons, !options.tool_jsons.empty());
-    const std::optional<std::uint32_t> automatic_boundary =
-        automatic_stable_boundary(message_roles, !options.tool_jsons.empty());
+    const std::optional<std::uint32_t> leading_boundary =
+        leading_instruction_boundary(message_roles);
+    std::vector<PromptCacheMarker> rendered_markers = cache_hints.markers;
+    std::optional<std::size_t> engine_tool_marker_index;
+    if (cache_hints.allow_engine_automatic_shared_prefixes && !options.tool_jsons.empty()) {
+        engine_tool_marker_index = rendered_markers.size();
+        rendered_markers.push_back(PromptCacheMarker{
+            .kind             = PromptCacheMarkerKind::SharedStablePrefix,
+            .evidence         = SharedCandidateEvidence::EngineStructural,
+            .location         = PromptCacheMarkerLocation::ToolBoundary,
+            .after_tool_count = static_cast<std::uint32_t>(options.tool_jsons.size()),
+        });
+    }
     const std::size_t message_count       = input.messages.size();
     std::vector<fi::ChatMessage> messages = convert_messages(std::move(input.messages));
     const bool has_media =
@@ -1341,7 +1359,7 @@ PreparedPrompt Frontend::prepare(PromptInput input, const PreparationControl& co
         fi::ProcessedInput processed;
         try {
             processed =
-                processor.process(std::move(messages), render_options(options, cache_hints.markers),
+                processor.process(std::move(messages), render_options(options, rendered_markers),
                                   control, impl_->max_context);
         } catch (const fi::ProcessorError& error) { throw_processor_error(error); }
         result.token_ids.assign(processed.input_ids.begin(), processed.input_ids.end());
@@ -1375,7 +1393,7 @@ PreparedPrompt Frontend::prepare(PromptInput input, const PreparationControl& co
         cache_boundaries   = std::move(processed.cache_boundaries);
     } else {
         const fi::RenderedChat rendered =
-            impl_->chat_template.render(messages, render_options(options, cache_hints.markers));
+            impl_->chat_template.render(messages, render_options(options, rendered_markers));
         const auto tokenize_started = Clock::now();
         fi::EncodedChat encoded     = fi::encode_rendered_chat(
             *impl_->tokenizer, rendered, static_cast<std::size_t>(impl_->max_context) + 1U);
@@ -1396,8 +1414,9 @@ PreparedPrompt Frontend::prepare(PromptInput input, const PreparationControl& co
     (void)checked_token_count(result.token_ids.size());
     result.identity.reusable = true;
     result.context_cache     = prepare_context_cache(
-        std::move(cache_hints), message_count, message_boundaries, cache_boundaries,
-        automatic_boundary, impl_->max_cache_markers_per_request);
+        std::move(cache_hints), message_count, message_boundaries, rendered_markers,
+        cache_boundaries, result.vision_items, engine_tool_marker_index, leading_boundary,
+        checked_token_count(result.token_ids.size()));
     result.starts_in_reasoning =
         options.continuation == PromptContinuationMode::NewAssistantTurn && options.enable_thinking;
     result.prepare.seconds = std::chrono::duration<double>(Clock::now() - start).count();
@@ -1478,6 +1497,11 @@ PreparedPrompt Frontend::prepare_tokens(std::vector<TokenId> token_ids,
     result.context_cache.update_session_index = false;
     result.prepare.seconds = std::chrono::duration<double>(Clock::now() - start).count();
     return PreparedPrompt(std::move(prepared));
+}
+
+std::vector<TokenId> Frontend::tokenize_text(std::string_view text) const {
+    if (impl_ == nullptr) { throw std::logic_error("frontend is empty"); }
+    return impl_->tokenizer->encode(text);
 }
 
 OutputSession Frontend::make_output_session(const PreparedPrompt& prompt,

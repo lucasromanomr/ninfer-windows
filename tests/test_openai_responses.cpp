@@ -187,7 +187,8 @@ int test_budgets_and_nonsemantic_hints() {
                   {"max_tool_calls", 0},
                   {"prompt_cache_key", "stable-prefix"},
                   {"prompt_cache_retention", "24h"},
-                  {"prompt_cache_options", Json{{"mode", "explicit"}, {"ttl", "30m"}}},
+                  {"prompt_cache_options",
+                   Json{{"mode", "explicit"}, {"ttl", "30m"}, {"future_hint", true}}},
                   {"safety_identifier", "local-user"},
                   {"service_tier", "auto"},
                   {"stream_options", Json{{"include_obfuscation", false}}},
@@ -256,7 +257,8 @@ int test_typed_items_and_cache_markers() {
                       "reasoning and function call form one assistant turn");
     failures += check(request.prompt.input_turns[1].role == ninfer::ChatRole::Tool &&
                           request.prompt.input_turns[1].content.size() == 2 &&
-                          request.prompt.input_turns[1].content[0].cache_boundary_after ==
+                          request.prompt.input_turns[1].content[0].cache_boundary_after &&
+                          request.prompt.input_turns[1].content[0].cache_boundary_after->kind ==
                               ninfer::PromptCacheMarkerKind::SharedStablePrefix &&
                           request.prompt.input_turns[1].content[1].kind == ContentKind::Image,
                       "typed multimodal tool output and explicit cache marker preserved");
@@ -265,8 +267,9 @@ int test_typed_items_and_cache_markers() {
                           request.prompt.input_items[3].at("status") == "incomplete" &&
                           request.prompt.input_items[3].at("phase") == "commentary",
                       "refusal text and harmless assistant metadata are accepted");
-    failures += check(request.prompt.input_turns[3].content[0].cache_boundary_after ==
-                          ninfer::PromptCacheMarkerKind::SharedStablePrefix,
+    failures += check(request.prompt.input_turns[3].content[0].cache_boundary_after &&
+                          request.prompt.input_turns[3].content[0].cache_boundary_after->kind ==
+                              ninfer::PromptCacheMarkerKind::SharedStablePrefix,
                       "message cache marker preserved");
 
     OpenAIResponsesStore store(8, 1ULL << 20);
@@ -333,7 +336,8 @@ int test_contiguous_assistant_items() {
     failures +=
         check(assistant.role == ninfer::ChatRole::Assistant && assistant.content.size() == 1 &&
                   assistant.content[0].text == "Let me check:" &&
-                  assistant.content[0].cache_boundary_after ==
+                  assistant.content[0].cache_boundary_after &&
+                  assistant.content[0].cache_boundary_after->kind ==
                       ninfer::PromptCacheMarkerKind::SharedStablePrefix &&
                   assistant.tool_calls.size() == 1 && assistant.tool_calls[0].id == "call_read",
               "assistant preamble, cache marker and function call were not coalesced");

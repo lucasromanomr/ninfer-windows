@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <vector>
 
 namespace ninfer::targets::qwen3_6 {
@@ -15,12 +16,11 @@ namespace ninfer::targets::qwen3_6 {
 inline constexpr std::size_t kTokenDomain = 248077;
 
 struct FrontendOptions {
-    bool vision_enabled                         = true;
-    std::uint32_t max_context                   = 2'048;
-    std::size_t media_cache_bytes               = kDefaultMediaCacheBytes;
-    std::size_t media_live_bytes                = kDefaultMediaLiveBytes;
-    std::uint32_t media_preprocess_threads      = 0;
-    std::uint32_t max_cache_markers_per_request = 4;
+    bool vision_enabled                    = true;
+    std::uint32_t max_context              = 2'048;
+    std::size_t media_cache_bytes          = kDefaultMediaCacheBytes;
+    std::size_t media_live_bytes           = kDefaultMediaLiveBytes;
+    std::uint32_t media_preprocess_threads = 0;
 };
 
 struct FrontendResources;
@@ -135,6 +135,7 @@ public:
                                              const PreparationControl& control = {}) const;
     [[nodiscard]] PreparedPrompt prepare_tokens(std::vector<TokenId> token_ids,
                                                 bool allow_prefix_identity = true) const;
+    [[nodiscard]] std::vector<TokenId> tokenize_text(std::string_view text) const;
     [[nodiscard]] PromptCapabilities prompt_capabilities() const noexcept;
     [[nodiscard]] MediaCacheSummary media_cache_summary() const;
     [[nodiscard]] OutputSession
