@@ -1,0 +1,139 @@
+name: Windows release
+
+# Builds the CUDA server and the NInfer Control app on a Windows runner and publishes both.
+# Pushing a v* tag creates the GitHub Release; workflow_dispatch runs the same build and leaves
+# the packages as workflow artifacts.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      cuda-version:
+        description: 'CUDA Toolkit version (13.1 or newer; the build rejects older toolkits)'
+        required: false
+        default: '13.3.1'
+      publish-release:
+        description: 'Create a draft GitHub Release from this run'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  CUDA_VERSION: ${{ inputs.cuda-version || '13.3.1' }}
+  BUILD_DIR: build-ninja
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 300
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Ninja generator does not set up the MSVC environment on its own: without INCLUDE and
+      # LIB, cl.exe cannot find corecrt.h and link.exe cannot find secur32.lib.
+      - name: Set up MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
+
+      # sm_120a is the only architecture the build accepts. nvcc emits it without a GPU present,
+      # so the runner needs the toolkit but no NVIDIA hardware.
+      - name: Set up CUDA ${{ env.CUDA_VERSION }}
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "cufft", "cufft_dev", "nvrtc", "nvrtc_dev", "thrust", "cuda_profiler_api", "visual_studio_integration"]'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # vcpkg builds ffmpeg from source; without a warm binary cache the first run is the long one.
+      - name: Enable vcpkg binary caching
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Configure
+        shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+        run: |
+          $ninja = (Get-Command ninja.exe -ErrorAction SilentlyContinue).Source
+          if (-not $ninja) {
+            $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+            $vs = & $vswhere -latest -products * -property installationPath | Select-Object -First 1
+            $ninja = Join-Path $vs 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
+          }
+          if (-not (Test-Path -LiteralPath $ninja)) { throw 'ninja.exe não foi encontrado no runner.' }
+
+          # nvcc and the CCCL headers must come from the same toolkit; mixing installed versions
+          # fails with "CUDA compiler and CUDA toolkit headers are incompatible".
+          $nvcc = Join-Path $env:CUDA_PATH 'bin\nvcc.exe'
+          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts\buildsystems\vcpkg.cmake'
+
+          cmake -S . -B $env:BUILD_DIR -G "Ninja Multi-Config" `
+            -DCMAKE_MAKE_PROGRAM="$($ninja.Replace('\', '/'))" `
+            -DCMAKE_CUDA_COMPILER="$($nvcc.Replace('\', '/'))" `
+            -DCMAKE_TOOLCHAIN_FILE="$($toolchain.Replace('\', '/'))" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build server
+        shell: pwsh
+        env:
+          VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
+        run: cmake --build $env:BUILD_DIR --config Release --parallel
+
+      # The same script used locally: it publishes the app and copies ninfer-serve.exe plus its
+      # DLLs next to NInferControl.exe, so the package needs no manual server path.
+      - name: Package NInfer Control (portable, server included)
+        shell: pwsh
+        run: |
+          ./apps/ninfer-control/build-portable-release.ps1 `
+            -ServerBuildDirectory (Join-Path $PWD $env:BUILD_DIR) `
+            -SkipServerBuild
+
+      - name: Package server only
+        shell: pwsh
+        run: |
+          $staging = 'dist/ninfer-server-x64'
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          Get-ChildItem (Join-Path $env:BUILD_DIR 'apps/Release') -File |
+            Where-Object { $_.Extension -in '.exe', '.dll' } |
+            Copy-Item -Destination $staging -Force
+          Compress-Archive -Path "$staging/*" -DestinationPath 'dist/ninfer-server-x64.zip' -Force
+
+      - name: Report package contents
+        shell: pwsh
+        run: Get-ChildItem dist -File | Select-Object Name, @{ n = 'MiB'; e = { [math]::Round($_.Length / 1MB, 1) } }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ninfer-windows-x64
+          path: |
+            dist/NInferControl-Portable-x64.zip
+            dist/ninfer-server-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish-release
+        uses: softprops/action-gh-release@v3.0.3
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            dist/NInferControl-Portable-x64.zip
+            dist/ninfer-server-x64.zip

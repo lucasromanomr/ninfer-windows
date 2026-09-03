@@ -39,6 +39,18 @@ vcpkg_installed/
 tools/freq_corpus/fixtures/*
 !tools/freq_corpus/fixtures/ranking/
 
+# .NET / WinUI build output (apps/ninfer-control)
+bin/
+obj/
+AppPackages/
+BundleArtifacts/
+*.appx
+*.msix
+*.appxbundle
+*.msixbundle
+*.pfx
+*.cer
+
 # Editor / OS
 .vscode/
 .idea/
