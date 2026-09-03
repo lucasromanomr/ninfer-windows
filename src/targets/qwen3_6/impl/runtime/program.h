@@ -272,13 +272,19 @@ AdmissionCandidate<NINFER_QWEN36_VARIANT>::AdmissionCandidate(
     std::unique_ptr<detail::AdmissionCandidateImpl<NINFER_QWEN36_VARIANT>> impl) noexcept
     : impl_(std::move(impl)) {}
 
+// MSVC 19.44 drops out-of-line '= default' explicit specializations of these moves
+// (final Windows link fails with LNK2019; same quirk as the SequencePlan family,
+// fixed in b4087835), so the bodies move impl_ by hand.
 template <>
-AdmissionCandidate<NINFER_QWEN36_VARIANT>::AdmissionCandidate(AdmissionCandidate&&) noexcept =
-    default;
+AdmissionCandidate<NINFER_QWEN36_VARIANT>::AdmissionCandidate(AdmissionCandidate&& other) noexcept
+    : impl_(std::move(other.impl_)) {}
 
 template <>
 AdmissionCandidate<NINFER_QWEN36_VARIANT>&
-AdmissionCandidate<NINFER_QWEN36_VARIANT>::operator=(AdmissionCandidate&&) noexcept = default;
+AdmissionCandidate<NINFER_QWEN36_VARIANT>::operator=(AdmissionCandidate&& other) noexcept {
+    impl_ = std::move(other.impl_);
+    return *this;
+}
 
 template <>
 AdmissionCandidate<NINFER_QWEN36_VARIANT>::~AdmissionCandidate() = default;
@@ -290,12 +296,15 @@ CapturePressureCandidate<NINFER_QWEN36_VARIANT>::CapturePressureCandidate(
 
 template <>
 CapturePressureCandidate<NINFER_QWEN36_VARIANT>::CapturePressureCandidate(
-    CapturePressureCandidate&&) noexcept = default;
+    CapturePressureCandidate&& other) noexcept
+    : impl_(std::move(other.impl_)) {}
 
 template <>
 CapturePressureCandidate<NINFER_QWEN36_VARIANT>&
-CapturePressureCandidate<NINFER_QWEN36_VARIANT>::operator=(CapturePressureCandidate&&) noexcept =
-    default;
+CapturePressureCandidate<NINFER_QWEN36_VARIANT>::operator=(CapturePressureCandidate&& other) noexcept {
+    impl_ = std::move(other.impl_);
+    return *this;
+}
 
 template <>
 CapturePressureCandidate<NINFER_QWEN36_VARIANT>::~CapturePressureCandidate() = default;
