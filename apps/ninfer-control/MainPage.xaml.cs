@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
@@ -40,19 +41,13 @@ public sealed partial class MainPage : Page
         ServerPathBox.TextChanged += (_, _) => RefreshCommandPreview();
         ModelPathBox.TextChanged += (_, _) => RefreshCommandPreview();
         HostBox.TextChanged += (_, _) => RefreshCommandPreview();
-        PortBox.TextChanged += (_, _) => RefreshCommandPreview();
-        ConcurrencyBox.TextChanged += (_, _) => RefreshCommandPreview();
-        StatsIntervalBox.TextChanged += (_, _) => RefreshCommandPreview();
-        MaxContextBox.TextChanged += (_, _) => RefreshCommandPreview();
-        DefaultTokensBox.TextChanged += (_, _) => RefreshCommandPreview();
-        KvCapacityBox.TextChanged += (_, _) => RefreshCommandPreview();
-        DraftTokensBox.TextChanged += (_, _) => RefreshCommandPreview();
+        // NumberBox reports edits through ValueChanged; the toggles are wired in XAML to
+        // Option_Toggled so the preview is not refreshed twice per interaction.
+        foreach (var box in new[] { PortBox, ConcurrencyBox, StatsIntervalBox, MaxContextBox, DefaultTokensBox, KvCapacityBox, DraftTokensBox })
+        {
+            box.ValueChanged += (_, _) => RefreshCommandPreview();
+        }
         KvDtypeBox.SelectionChanged += (_, _) => RefreshCommandPreview();
-        VisionBox.Click += (_, _) => RefreshCommandPreview();
-        NoThinkingBox.Click += (_, _) => RefreshCommandPreview();
-        PreserveThinkingBox.Click += (_, _) => RefreshCommandPreview();
-        CorsBox.Click += (_, _) => RefreshCommandPreview();
-        LmHeadDraftBox.Click += (_, _) => RefreshCommandPreview();
         Loaded += MainPage_Loaded;
     }
 
@@ -79,7 +74,7 @@ public sealed partial class MainPage : Page
         if (file is not null)
         {
             ModelPathBox.Text = file.Path;
-            ModelHint.Text = $"Selecionado: {file.Name}";
+            ModelHint.SetDescriptionText($"Selecionado: {file.Name}");
         }
     }
 
@@ -92,7 +87,7 @@ public sealed partial class MainPage : Page
         if (file is not null)
         {
             ServerPathBox.Text = file.Path;
-            ServerHint.Text = "Executável selecionado manualmente.";
+            ServerHint.SetDescriptionText("Executável selecionado manualmente.");
         }
     }
 
@@ -125,7 +120,9 @@ public sealed partial class MainPage : Page
 
     private void ServerLayout_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var narrow = e.NewSize.Width < 980;
+        // Below this the 420px command column would squeeze the form past readability, so the two
+        // panes stack instead.
+        var narrow = e.NewSize.Width < 1080;
         if (_isNarrowServerLayout == narrow)
         {
             return;
@@ -133,8 +130,8 @@ public sealed partial class MainPage : Page
 
         _isNarrowServerLayout = narrow;
         ServerLayout.ColumnSpacing = narrow ? 0 : 16;
-        ServerLeftColumn.Width = new GridLength(narrow ? 1 : 1.15, GridUnitType.Star);
-        ServerRightColumn.Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        ServerLeftColumn.Width = new GridLength(1, GridUnitType.Star);
+        ServerRightColumn.Width = narrow ? new GridLength(0) : new GridLength(420);
         ServerLayout.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
         ServerLayout.RowDefinitions[1].Height = narrow ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
         Grid.SetColumn(ServerFormPane, 0);
@@ -144,9 +141,31 @@ public sealed partial class MainPage : Page
         ServerFormPane.Padding = narrow ? new Thickness(0, 0, 0, 12) : new Thickness(0, 0, 4, 0);
     }
 
-    private void KvAuto_Click(object sender, RoutedEventArgs e)
+    private void KvAuto_Toggled(object sender, RoutedEventArgs e)
     {
-        KvCapacityBox.IsEnabled = KvAutoBox.IsChecked != true;
+        if (KvCapacityBox is null || KvCapacityCard is null)
+        {
+            return;
+        }
+
+        var manual = !KvAutoBox.IsOn;
+        KvCapacityBox.IsEnabled = manual;
+        KvCapacityCard.IsEnabled = manual;
+        if (_settingsLoaded)
+        {
+            RefreshCommandPreview();
+        }
+    }
+
+    // Toggled fires as the parser assigns IsOn, long before the rest of the page exists, so every
+    // toggle handler has to no-op until the page has finished loading its saved settings.
+    private void Option_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_settingsLoaded)
+        {
+            return;
+        }
+
         RefreshCommandPreview();
     }
 
@@ -157,9 +176,23 @@ public sealed partial class MainPage : Page
             return;
         }
         var backend = SelectedTag(SpecBox) ?? "off";
+        ApplyBackendAvailability(backend);
+        DraftTokensBox.Maximum = backend == "dflash" ? 15 : 5;
+        if (DraftTokensBox.Value > DraftTokensBox.Maximum)
+        {
+            DraftTokensBox.Value = DraftTokensBox.Maximum;
+        }
+        RefreshCommandPreview();
+    }
+
+    // Controls that do not apply to the selected backend are dimmed rather than hidden, so the
+    // page does not reflow while the user compares backends.
+    private void ApplyBackendAvailability(string backend)
+    {
         DraftTokensBox.IsEnabled = backend != "off";
         LmHeadDraftBox.IsEnabled = backend == "mtp";
-        RefreshCommandPreview();
+        if (DraftTokensCard is not null) DraftTokensCard.IsEnabled = backend != "off";
+        if (LmHeadDraftCard is not null) LmHeadDraftCard.IsEnabled = backend == "mtp";
     }
 
     private async void Start_Click(object sender, RoutedEventArgs e)
@@ -174,10 +207,11 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        ClearValidation();
         await SaveSettingsAsync();
         _log.Clear();
         AppendLog("[NInfer Control] iniciando ninfer-serve.exe...");
-        SetStatus("Iniciando", "O modelo está sendo carregado na GPU...", "AccentBrush");
+        SetStatus("Iniciando", "O modelo está sendo carregado na GPU...", "AccentBrush", busy: true);
         StartButton.IsEnabled = false;
         StopButton.IsEnabled = true;
         OpenBrowserButton.IsEnabled = false;
@@ -209,7 +243,7 @@ public sealed partial class MainPage : Page
             _serverProcess = process;
             _ = PumpOutputAsync(process.StandardOutput, "OUT");
             _ = PumpOutputAsync(process.StandardError, "ERR");
-            SetStatus("Carregando", "Acompanhe o progresso no log abaixo.", "AccentBrush");
+            SetStatus("Carregando", "Acompanhe o progresso no log.", "AccentBrush", busy: true);
             ShowLogs_Click(sender, e);
         }
         catch (Exception ex)
@@ -242,6 +276,17 @@ public sealed partial class MainPage : Page
         _logWindow?.SetLog(string.Empty);
     }
 
+    private void CopyLog_Click(object sender, RoutedEventArgs e)
+    {
+        var data = new DataPackage();
+        data.SetText(_log.ToString());
+        Clipboard.SetContent(data);
+        StatusDetail.Text = "Log copiado para a área de transferência.";
+    }
+
+    private void WrapToggle_Click(object sender, RoutedEventArgs e)
+        => LogTextBox.TextWrapping = WrapToggle.IsChecked == true ? TextWrapping.Wrap : TextWrapping.NoWrap;
+
     private void StopServer()
     {
         var process = _serverProcess;
@@ -251,7 +296,7 @@ public sealed partial class MainPage : Page
         }
 
         _stopRequested = true;
-        SetStatus("Parando", "Encerrando o processo do servidor...", "MutedTextBrush");
+        SetStatus("Parando", "Encerrando o processo do servidor...", "MutedTextBrush", busy: true);
         try
         {
             if (!process.HasExited)
@@ -325,7 +370,12 @@ public sealed partial class MainPage : Page
             }
             var text = _log.ToString();
             LogTextBox.Text = text;
-            LogTextBox.Select(text.Length, 0);
+            // Moving the caret is what scrolls a read-only TextBox; skip it when the user turned
+            // auto-scroll off so they can read back through the buffer while output keeps arriving.
+            if (AutoScrollToggle.IsChecked == true)
+            {
+                LogTextBox.Select(text.Length, 0);
+            }
             _logWindow?.SetLog(text);
         }
 
@@ -354,19 +404,19 @@ public sealed partial class MainPage : Page
 
     private void RefreshCommandPreview()
     {
-        if (CommandPreview is null) return;
+        if (CommandPreview is null || CorsBox is null) return;
         var values = new List<string>
         {
             "ninfer-serve.exe",
             Quote(ModelPathBox.Text.Trim()),
             "--host", Quote(HostBox.Text.Trim()),
-            "--port", PortBox.Text.Trim(),
-            "--max-context", MaxContextBox.Text.Trim(),
-            "--default-max-tokens", DefaultTokensBox.Text.Trim(),
+            "--port", Num(PortBox).ToString(),
+            "--max-context", Num(MaxContextBox).ToString(),
+            "--default-max-tokens", Num(DefaultTokensBox).ToString(),
             "--kv-dtype", SelectedTag(KvDtypeBox) ?? "int8",
-            "--kv-capacity", KvAutoBox.IsChecked == true ? "auto" : KvCapacityBox.Text.Trim(),
-            "--max-concurrency", ConcurrencyBox.Text.Trim(),
-            "--log-stats-interval-ms", StatsIntervalBox.Text.Trim(),
+            "--kv-capacity", KvAutoBox.IsOn ? "auto" : Num(KvCapacityBox).ToString(),
+            "--max-concurrency", Num(ConcurrencyBox).ToString(),
+            "--log-stats-interval-ms", Num(StatsIntervalBox).ToString(),
         };
 
         var backend = SelectedTag(SpecBox) ?? "off";
@@ -375,13 +425,13 @@ public sealed partial class MainPage : Page
             values.Add("--spec");
             values.Add(backend);
             values.Add("--draft-tokens");
-            values.Add(DraftTokensBox.Text.Trim());
-            if (backend == "mtp" && LmHeadDraftBox.IsChecked == true) values.Add("--lm-head-draft");
+            values.Add(Num(DraftTokensBox).ToString());
+            if (backend == "mtp" && LmHeadDraftBox.IsOn) values.Add("--lm-head-draft");
         }
-        if (VisionBox.IsChecked == true) values.Add("--vision");
-        if (NoThinkingBox.IsChecked == true) values.Add("--no-thinking");
-        if (PreserveThinkingBox.IsChecked == true) values.Add("--preserve-thinking");
-        if (CorsBox.IsChecked == true) values.Add("--cors");
+        if (VisionBox.IsOn) values.Add("--vision");
+        if (NoThinkingBox.IsOn) values.Add("--no-thinking");
+        if (PreserveThinkingBox.IsOn) values.Add("--preserve-thinking");
+        if (CorsBox.IsOn) values.Add("--cors");
 
         _lastCommand = string.Join(" ", values);
         CommandPreview.Text = _lastCommand;
@@ -406,43 +456,44 @@ public sealed partial class MainPage : Page
         var serverPath = ServerPathBox.Text.Trim();
         if (!File.Exists(modelPath) || !modelPath.EndsWith(".ninfer", StringComparison.OrdinalIgnoreCase))
         {
-            ShowValidation("Selecione um arquivo .ninfer existente.", ModelHint);
+            ShowValidation("Selecione um arquivo .ninfer existente.", ServerNavItem);
             return false;
         }
         if (!File.Exists(serverPath))
         {
-            ShowValidation("Selecione um ninfer-serve.exe existente.", ServerHint);
+            ShowValidation("Selecione um ninfer-serve.exe existente.", ServerNavItem);
             return false;
         }
 
-        if (!int.TryParse(PortBox.Text, out var port) || port is < 1 or > 65535 ||
-            !uint.TryParse(MaxContextBox.Text, out var maxContext) || maxContext == 0 ||
-            !int.TryParse(DefaultTokensBox.Text, out var defaultTokens) || defaultTokens <= 0 ||
-            !uint.TryParse(ConcurrencyBox.Text, out var concurrency) || concurrency is < 1 or > 8 ||
-            !uint.TryParse(StatsIntervalBox.Text, out var statsInterval))
+        var port = (int)Num(PortBox);
+        var maxContext = Num(MaxContextBox);
+        var defaultTokens = (int)Num(DefaultTokensBox);
+        var concurrency = Num(ConcurrencyBox);
+        var statsInterval = Num(StatsIntervalBox);
+        if (port is < 1 or > 65535 || maxContext == 0 || defaultTokens <= 0 || concurrency is < 1 or > 8)
         {
-            ShowValidation("Revise porta, contexto, tokens, concorrência e intervalo de estatísticas.", StatusDetail);
+            ShowValidation("Revise porta, contexto, tokens e concorrência.", AdvancedNavItem);
             return false;
         }
 
-        var kvCapacity = KvAutoBox.IsChecked == true ? 0u : ParseUInt(KvCapacityBox.Text);
-        if (KvAutoBox.IsChecked != true && (kvCapacity == 0 || kvCapacity < maxContext))
+        var kvCapacity = KvAutoBox.IsOn ? 0u : Num(KvCapacityBox);
+        if (!KvAutoBox.IsOn && (kvCapacity == 0 || kvCapacity < maxContext))
         {
-            ShowValidation("A capacidade do KV deve ser igual ou maior que o contexto máximo.", StatusDetail);
+            ShowValidation($"A capacidade do KV ({kvCapacity}) deve ser igual ou maior que o contexto máximo ({maxContext}).", AdvancedNavItem);
             return false;
         }
 
         var backend = SelectedTag(SpecBox) ?? "off";
-        var draftTokens = ParseUInt(DraftTokensBox.Text);
+        var draftTokens = Num(DraftTokensBox);
         var maxDraft = backend == "dflash" ? 15u : 5u;
         if (backend != "off" && (draftTokens is < 1 || draftTokens > maxDraft))
         {
-            ShowValidation($"Draft tokens deve ficar entre 1 e {maxDraft} para {backend}.", StatusDetail);
+            ShowValidation($"Draft tokens deve ficar entre 1 e {maxDraft} para {backend}.", AdvancedNavItem);
             return false;
         }
-        if (backend == "dflash" && VisionBox.IsChecked == true)
+        if (backend == "dflash" && VisionBox.IsOn)
         {
-            ShowValidation("DFlash não pode ser combinado com Vision.", StatusDetail);
+            ShowValidation("DFlash não pode ser combinado com Vision.", AdvancedNavItem);
             return false;
         }
 
@@ -456,21 +507,19 @@ public sealed partial class MainPage : Page
             DefaultTokens = defaultTokens,
             KvDtype = SelectedTag(KvDtypeBox) ?? "int8",
             KvCapacity = kvCapacity,
-            KvAuto = KvAutoBox.IsChecked == true,
+            KvAuto = KvAutoBox.IsOn,
             Concurrency = concurrency,
             StatsInterval = statsInterval,
             Backend = backend,
             DraftTokens = draftTokens,
-            LmHeadDraft = LmHeadDraftBox.IsChecked == true && backend == "mtp",
-            Vision = VisionBox.IsChecked == true,
-            NoThinking = NoThinkingBox.IsChecked == true,
-            PreserveThinking = PreserveThinkingBox.IsChecked == true,
-            Cors = CorsBox.IsChecked == true,
+            LmHeadDraft = LmHeadDraftBox.IsOn && backend == "mtp",
+            Vision = VisionBox.IsOn,
+            NoThinking = NoThinkingBox.IsOn,
+            PreserveThinking = PreserveThinkingBox.IsOn,
+            Cors = CorsBox.IsOn,
         };
         return true;
     }
-
-    private static uint ParseUInt(string text) => uint.TryParse(text, out var value) ? value : 0;
 
     private IEnumerable<string> BuildArguments(ServerConfiguration c)
     {
@@ -495,18 +544,36 @@ public sealed partial class MainPage : Page
         if (c.Cors) yield return "--cors";
     }
 
-    private void SetStatus(string status, string detail, string brushKey)
+    private void SetStatus(string status, string detail, string brushKey, bool busy = false)
     {
         StatusText.Text = status;
         StatusDetail.Text = detail;
         StatusDot.Fill = (Brush)Application.Current.Resources[brushKey];
+        StatusDot.Visibility = busy ? Visibility.Collapsed : Visibility.Visible;
+        StatusRing.IsActive = busy;
+        StatusRing.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        AutomationProperties.SetName(StatusBadge, $"Status do servidor: {status}. {detail}");
     }
 
-    private void ShowValidation(string message, TextBlock target)
+    // Every validation failure lands in the same InfoBar, and the nav item that owns the offending
+    // field is named so the user knows where to go instead of hunting for red text.
+    private void ShowValidation(string message, NavigationViewItem origin)
     {
-        target.Text = message;
+        ValidationBar.Title = ReferenceEquals(origin, AdvancedNavItem) ? "Ajustes avançados" : "Servidor";
+        ValidationBar.Message = message;
+        ValidationBar.Severity = InfoBarSeverity.Error;
+        ValidationBar.IsOpen = true;
+        if (!ReferenceEquals(MainNavigation.SelectedItem, origin))
+        {
+            MainNavigation.SelectedItem = origin;
+            ShowDestination((string)origin.Tag);
+        }
         SetStatus("Revise os campos", message, "DangerBrush");
     }
+
+    private void ClearValidation() => ValidationBar.IsOpen = false;
+
+    private static uint Num(NumberBox box) => double.IsNaN(box.Value) || box.Value < 0 ? 0u : (uint)box.Value;
 
     private static string? SelectedTag(ComboBox combo)
         => (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString();
@@ -550,25 +617,27 @@ public sealed partial class MainPage : Page
             if (!string.IsNullOrWhiteSpace(snapshot.ModelPath)) ModelPathBox.Text = snapshot.ModelPath;
             if (BundledServerExecutable() is null && !string.IsNullOrWhiteSpace(snapshot.ServerPath) && File.Exists(snapshot.ServerPath)) ServerPathBox.Text = snapshot.ServerPath;
             if (!string.IsNullOrWhiteSpace(snapshot.Host)) HostBox.Text = snapshot.Host;
-            PortBox.Text = snapshot.Port.ToString();
-            MaxContextBox.Text = snapshot.MaxContext.ToString();
-            DefaultTokensBox.Text = snapshot.DefaultTokens.ToString();
-            KvCapacityBox.Text = snapshot.KvCapacity.ToString();
-            KvAutoBox.IsChecked = snapshot.KvAuto;
+            PortBox.Value = snapshot.Port;
+            MaxContextBox.Value = snapshot.MaxContext;
+            DefaultTokensBox.Value = snapshot.DefaultTokens;
+            KvCapacityBox.Value = snapshot.KvCapacity;
+            KvAutoBox.IsOn = snapshot.KvAuto;
             KvCapacityBox.IsEnabled = !snapshot.KvAuto;
-            ConcurrencyBox.Text = snapshot.Concurrency.ToString();
-            StatsIntervalBox.Text = snapshot.StatsInterval.ToString();
-            DraftTokensBox.Text = snapshot.DraftTokens.ToString();
+            KvCapacityCard.IsEnabled = !snapshot.KvAuto;
+            ConcurrencyBox.Value = snapshot.Concurrency;
+            StatsIntervalBox.Value = snapshot.StatsInterval;
             KvDtypeBox.SelectedIndex = snapshot.KvDtype == "bf16" ? 0 : 1;
             SpecBox.SelectedIndex = snapshot.Backend switch { "mtp" => 1, "dflash" => 2, _ => 0 };
-            VisionBox.IsChecked = snapshot.Vision;
-            NoThinkingBox.IsChecked = snapshot.NoThinking;
-            PreserveThinkingBox.IsChecked = snapshot.PreserveThinking;
-            CorsBox.IsChecked = snapshot.Cors;
-            LmHeadDraftBox.IsChecked = snapshot.LmHeadDraft;
+            VisionBox.IsOn = snapshot.Vision;
+            NoThinkingBox.IsOn = snapshot.NoThinking;
+            PreserveThinkingBox.IsOn = snapshot.PreserveThinking;
+            CorsBox.IsOn = snapshot.Cors;
+            LmHeadDraftBox.IsOn = snapshot.LmHeadDraft;
             var backend = SelectedTag(SpecBox) ?? "off";
-            DraftTokensBox.IsEnabled = backend != "off";
-            LmHeadDraftBox.IsEnabled = backend == "mtp";
+            // Maximum is set before Value so a saved DFlash draft count is not clamped to the MTP limit.
+            DraftTokensBox.Maximum = backend == "dflash" ? 15 : 5;
+            DraftTokensBox.Value = snapshot.DraftTokens;
+            ApplyBackendAvailability(backend);
         }
         catch (Exception ex)
         {
@@ -583,11 +652,11 @@ public sealed partial class MainPage : Page
             var snapshot = new SettingsSnapshot
             {
                 ModelPath = ModelPathBox.Text.Trim(), ServerPath = ServerPathBox.Text.Trim(), Host = HostBox.Text.Trim(),
-                Port = ParseUInt(PortBox.Text), MaxContext = ParseUInt(MaxContextBox.Text), DefaultTokens = ParseUInt(DefaultTokensBox.Text),
-                KvDtype = SelectedTag(KvDtypeBox) ?? "int8", KvCapacity = ParseUInt(KvCapacityBox.Text), KvAuto = KvAutoBox.IsChecked == true,
-                Concurrency = ParseUInt(ConcurrencyBox.Text), StatsInterval = ParseUInt(StatsIntervalBox.Text), Backend = SelectedTag(SpecBox) ?? "off",
-                DraftTokens = ParseUInt(DraftTokensBox.Text), LmHeadDraft = LmHeadDraftBox.IsChecked == true, Vision = VisionBox.IsChecked == true,
-                NoThinking = NoThinkingBox.IsChecked == true, PreserveThinking = PreserveThinkingBox.IsChecked == true, Cors = CorsBox.IsChecked == true,
+                Port = Num(PortBox), MaxContext = Num(MaxContextBox), DefaultTokens = Num(DefaultTokensBox),
+                KvDtype = SelectedTag(KvDtypeBox) ?? "int8", KvCapacity = Num(KvCapacityBox), KvAuto = KvAutoBox.IsOn,
+                Concurrency = Num(ConcurrencyBox), StatsInterval = Num(StatsIntervalBox), Backend = SelectedTag(SpecBox) ?? "off",
+                DraftTokens = Num(DraftTokensBox), LmHeadDraft = LmHeadDraftBox.IsOn, Vision = VisionBox.IsOn,
+                NoThinking = NoThinkingBox.IsOn, PreserveThinking = PreserveThinkingBox.IsOn, Cors = CorsBox.IsOn,
             };
             var path = GetSettingsPath();
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

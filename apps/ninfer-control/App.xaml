@@ -8,52 +8,30 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <!-- The app draws its surfaces, text and accents from the Fluent theme resources, so it
+                 follows the user's accent colour, light/dark choice and high contrast automatically.
+                 Only these few semantic aliases are declared, and the status brushes are looked up by
+                 key from code in SetStatus. The terminal keeps a fixed dark ground in every theme,
+                 the way console surfaces do, except under high contrast. -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0F151A" />
-                    <SolidColorBrush x:Key="SurfaceBrush" Color="#162027" />
-                    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#1B2932" />
-                    <SolidColorBrush x:Key="CardStrokeBrush" Color="#2A3A44" />
-                    <SolidColorBrush x:Key="MutedTextBrush" Color="#9DAEB8" />
-                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#F1F6F8" />
-                    <SolidColorBrush x:Key="AccentBrush" Color="#42D3B2" />
-                    <SolidColorBrush x:Key="AccentStrongBrush" Color="#157D6A" />
-                    <SolidColorBrush x:Key="DangerBrush" Color="#FF8C8C" />
-                    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#222D35" />
-                    <SolidColorBrush x:Key="InputBorderBrush" Color="#3B4B55" />
-                    <SolidColorBrush x:Key="InputForegroundBrush" Color="#F1F6F8" />
+                    <StaticResource x:Key="AccentBrush" ResourceKey="AccentFillColorDefaultBrush" />
+                    <StaticResource x:Key="DangerBrush" ResourceKey="SystemFillColorCriticalBrush" />
+                    <StaticResource x:Key="MutedTextBrush" ResourceKey="TextFillColorTertiaryBrush" />
                     <SolidColorBrush x:Key="TerminalBrush" Color="#0A0F13" />
                     <SolidColorBrush x:Key="TerminalTextBrush" Color="#D7E6E7" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F8F9" />
-                    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="#E9F2F2" />
-                    <SolidColorBrush x:Key="CardStrokeBrush" Color="#C8D8DB" />
-                    <SolidColorBrush x:Key="MutedTextBrush" Color="#52666D" />
-                    <SolidColorBrush x:Key="PrimaryTextBrush" Color="#132126" />
-                    <SolidColorBrush x:Key="AccentBrush" Color="#087E6B" />
-                    <SolidColorBrush x:Key="AccentStrongBrush" Color="#B9E8DF" />
-                    <SolidColorBrush x:Key="DangerBrush" Color="#B42318" />
-                    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#FFFFFF" />
-                    <SolidColorBrush x:Key="InputBorderBrush" Color="#A8BDC2" />
-                    <SolidColorBrush x:Key="InputForegroundBrush" Color="#132126" />
+                    <StaticResource x:Key="AccentBrush" ResourceKey="AccentFillColorDefaultBrush" />
+                    <StaticResource x:Key="DangerBrush" ResourceKey="SystemFillColorCriticalBrush" />
+                    <StaticResource x:Key="MutedTextBrush" ResourceKey="TextFillColorTertiaryBrush" />
                     <SolidColorBrush x:Key="TerminalBrush" Color="#10191D" />
                     <SolidColorBrush x:Key="TerminalTextBrush" Color="#E4F0F0" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
-                    <StaticResource x:Key="AppBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
-                    <StaticResource x:Key="SurfaceBrush" ResourceKey="SystemColorButtonFaceColorBrush" />
-                    <StaticResource x:Key="SurfaceElevatedBrush" ResourceKey="SystemColorButtonFaceColorBrush" />
-                    <StaticResource x:Key="CardStrokeBrush" ResourceKey="SystemColorButtonTextColorBrush" />
-                    <StaticResource x:Key="MutedTextBrush" ResourceKey="SystemColorGrayTextColorBrush" />
-                    <StaticResource x:Key="PrimaryTextBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <StaticResource x:Key="AccentBrush" ResourceKey="SystemColorHighlightColorBrush" />
-                    <StaticResource x:Key="AccentStrongBrush" ResourceKey="SystemColorHighlightColorBrush" />
                     <StaticResource x:Key="DangerBrush" ResourceKey="SystemColorHotlightColorBrush" />
-                    <StaticResource x:Key="InputBackgroundBrush" ResourceKey="SystemColorWindowColorBrush" />
-                    <StaticResource x:Key="InputBorderBrush" ResourceKey="SystemColorWindowTextColorBrush" />
-                    <StaticResource x:Key="InputForegroundBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                    <StaticResource x:Key="MutedTextBrush" ResourceKey="SystemColorGrayTextColorBrush" />
                     <StaticResource x:Key="TerminalBrush" ResourceKey="SystemColorWindowColorBrush" />
                     <StaticResource x:Key="TerminalTextBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                 </ResourceDictionary>

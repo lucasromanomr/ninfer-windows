@@ -2,165 +2,255 @@
     x:Class="NInferControl.MainPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Background="{ThemeResource AppBackgroundBrush}">
+    xmlns:local="using:NInferControl">
     <Page.Resources>
-        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="20" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}" />
-            <Setter Property="Margin" Value="0,0,0,4" />
+        <!-- Fluent type ramp, so the app follows the system's text scaling and high-contrast rules. -->
+        <Style x:Key="PageTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}" />
+        <Style x:Key="PageSubtitleStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Setter Property="Margin" Value="0,4,0,0" />
         </Style>
-        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-            <Setter Property="Foreground" Value="{ThemeResource PrimaryTextBrush}" />
-            <Setter Property="Margin" Value="0,0,0,6" />
-        </Style>
-        <Style x:Key="HelperStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="13" />
-            <Setter Property="Foreground" Value="{ThemeResource MutedTextBrush}" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Margin" Value="0,6,0,0" />
+        <Style x:Key="GroupHeaderStyle" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="2,20,0,8" />
         </Style>
         <Style x:Key="CardStyle" TargetType="Border">
-            <Setter Property="Background" Value="{ThemeResource SurfaceBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeBrush}" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="12" />
-            <Setter Property="Padding" Value="20" />
-            <Setter Property="Margin" Value="0,0,0,16" />
+            <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+            <Setter Property="Padding" Value="16" />
         </Style>
-        <Style x:Key="InputTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="{ThemeResource InputBackgroundBrush}" />
-            <Setter Property="Foreground" Value="{ThemeResource InputForegroundBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource InputBorderBrush}" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-            <Setter Property="VerticalContentAlignment" Value="Center" />
-        </Style>
-        <Style TargetType="TextBox" BasedOn="{StaticResource InputTextBoxStyle}" />
         <Style x:Key="MonoTextBoxStyle" TargetType="TextBox">
-            <Setter Property="Background" Value="{ThemeResource InputBackgroundBrush}" />
-            <Setter Property="Foreground" Value="{ThemeResource InputForegroundBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource InputBorderBrush}" />
-            <Setter Property="HorizontalContentAlignment" Value="Left" />
-            <Setter Property="VerticalContentAlignment" Value="Top" />
-            <Setter Property="FontFamily" Value="Cascadia Mono" />
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Courier New" />
             <Setter Property="FontSize" Value="12" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="IsSpellCheckEnabled" Value="False" />
         </Style>
-        <Style x:Key="AccentButtonStyle" TargetType="Button">
-            <Setter Property="Background" Value="{ThemeResource AccentBrush}" />
-            <Setter Property="Foreground" Value="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource AccentBrush}" />
+        <Style x:Key="CompactNumberBoxStyle" TargetType="NumberBox">
+            <Setter Property="SpinButtonPlacementMode" Value="Compact" />
+            <Setter Property="ValidationMode" Value="InvalidInputOverwritten" />
+            <Setter Property="MinWidth" Value="150" />
         </Style>
     </Page.Resources>
 
-    <NavigationView x:Name="MainNavigation" PaneTitle="NInfer Control"
-                    IsSettingsVisible="False" IsBackButtonVisible="Collapsed"
+    <NavigationView x:Name="MainNavigation"
+                    IsSettingsVisible="False"
+                    IsBackButtonVisible="Collapsed"
+                    PaneDisplayMode="Left"
+                    OpenPaneLength="240"
                     SelectionChanged="NavigationView_SelectionChanged">
         <NavigationView.MenuItems>
-            <NavigationViewItem x:Name="ServerNavItem" Content="Servidor" Tag="server" Icon="World" IsSelected="True" />
-            <NavigationViewItem x:Name="AdvancedNavItem" Content="Configurações avançadas" Tag="advanced" Icon="Setting" />
-            <NavigationViewItem x:Name="LogsNavItem" Content="Logs" Tag="logs" Icon="Document" />
+            <NavigationViewItem x:Name="ServerNavItem" Content="Servidor" Tag="server" IsSelected="True"
+                                ToolTipService.ToolTip="Modelo, endpoint e operação">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE968;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="AdvancedNavItem" Content="Ajustes avançados" Tag="advanced"
+                                ToolTipService.ToolTip="Memória, KV cache e execução especulativa">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE9E9;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="LogsNavItem" Content="Logs" Tag="logs"
+                                ToolTipService.ToolTip="Saída do processo em tempo real">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE9D9;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
         </NavigationView.MenuItems>
 
-        <Grid Padding="32,28,32,24">
+        <!-- Status sits in the pane footer so it stays visible on every page, including Logs. -->
+        <NavigationView.PaneFooter>
+            <Border x:Name="StatusBadge" Margin="12,0,12,12" Padding="12,10"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="{ThemeResource ControlCornerRadius}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Ellipse x:Name="StatusDot" Width="10" Height="10" VerticalAlignment="Center"
+                             Fill="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <ProgressRing x:Name="StatusRing" Width="16" Height="16" IsActive="False"
+                                  Visibility="Collapsed" VerticalAlignment="Center" />
+                    <TextBlock x:Name="StatusText" Text="Parado" Style="{StaticResource BodyStrongTextBlockStyle}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+        </NavigationView.PaneFooter>
+
+        <Grid Padding="28,20,28,20">
+            <!-- ==================== SERVIDOR ==================== -->
             <Grid x:Name="ServerView">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
-                <Grid Margin="0,0,0,24">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Servidor" FontSize="32" FontWeight="Bold" Foreground="{ThemeResource PrimaryTextBrush}" />
-                        <TextBlock Text="Escolha o modelo, defina o endpoint e inicie a inferência."
-                                   FontSize="15" Foreground="{ThemeResource MutedTextBrush}" Margin="0,6,0,0" />
-                    </StackPanel>
-                    <Border Grid.Column="1" x:Name="StatusBadge" HorizontalAlignment="Right" VerticalAlignment="Center"
-                            Background="{ThemeResource SurfaceElevatedBrush}" BorderBrush="{ThemeResource CardStrokeBrush}"
-                            BorderThickness="1" CornerRadius="18" Padding="12,8">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="{ThemeResource MutedTextBrush}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="StatusText" Text="Parado" FontWeight="SemiBold" Foreground="{ThemeResource PrimaryTextBrush}" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
 
-                <Grid x:Name="ServerLayout" Grid.Row="1" ColumnSpacing="16" MinHeight="0" SizeChanged="ServerLayout_SizeChanged">
-                    <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="0" /></Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,16">
+                    <TextBlock Text="Servidor" Style="{StaticResource PageTitleStyle}" />
+                    <TextBlock Text="Escolha o modelo, defina o endpoint e inicie a inferência."
+                               Style="{StaticResource PageSubtitleStyle}" />
+                </StackPanel>
+
+                <!-- Every problem surfaces here, instead of red text scattered across the form. -->
+                <InfoBar x:Name="ValidationBar" Grid.Row="1" IsOpen="False" IsClosable="True"
+                         Severity="Error" Margin="0,0,0,16" />
+
+                <Grid x:Name="ServerLayout" Grid.Row="2" ColumnSpacing="16" MinHeight="0" SizeChanged="ServerLayout_SizeChanged">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="0" />
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="ServerLeftColumn" Width="1.15*" />
-                        <ColumnDefinition x:Name="ServerRightColumn" Width="1*" />
+                        <!-- The right column carries the action buttons and the command preview, whose
+                             width is not negotiable; the form column absorbs whatever is left. -->
+                        <ColumnDefinition x:Name="ServerLeftColumn" Width="*" MinWidth="360" />
+                        <ColumnDefinition x:Name="ServerRightColumn" Width="420" />
                     </Grid.ColumnDefinitions>
+
                     <ScrollViewer x:Name="ServerFormPane" Grid.Row="0" Grid.Column="0"
-                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
-                        <StackPanel>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="Modelo" Style="{StaticResource SectionTitleStyle}" />
-                                    <TextBlock Text="Selecione o artefato .ninfer que será carregado na GPU."
-                                               Style="{StaticResource HelperStyle}" Margin="0,0,0,16" />
-                                    <TextBlock Text="Arquivo do modelo" Style="{StaticResource FieldLabelStyle}" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <TextBox x:Name="ModelPathBox" PlaceholderText="C:\modelos\qwen3_8_27b_nvfp4.ninfer" AutomationProperties.Name="Arquivo do modelo" />
-                                        <Button Grid.Column="1" Click="BrowseModel_Click" ToolTipService.ToolTip="Selecionar arquivo .ninfer">
-                                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8E5;" FontFamily="{ThemeResource SymbolThemeFontFamily}" /><TextBlock Text="Selecionar" /></StackPanel>
-                                        </Button>
-                                    </Grid>
-                                    <TextBlock x:Name="ModelHint" Text="Obrigatório. O caminho é salvo automaticamente." Style="{StaticResource HelperStyle}" />
-                                </StackPanel>
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="0,0,4,0">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Modelo" Style="{StaticResource GroupHeaderStyle}" Margin="2,0,0,8" />
+
+                            <local:SettingsRow x:Name="ModelHint" Glyph="&#xE8A5;" Header="Arquivo do modelo"
+                                               Description="Artefato .ninfer carregado na GPU. Obrigatório.">
+                                <Button x:Name="BrowseModelButton" Click="BrowseModel_Click"
+                                        ToolTipService.ToolTip="Selecionar arquivo .ninfer">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE8E5;" FontSize="14" />
+                                        <TextBlock Text="Procurar" />
+                                    </StackPanel>
+                                </Button>
+                            </local:SettingsRow>
+
+                            <Border Style="{StaticResource CardStyle}" Padding="16,12">
+                                <TextBox x:Name="ModelPathBox" Header="Caminho"
+                                         PlaceholderText="C:\modelos\qwen3_8_27b_nvfp4.ninfer"
+                                         AutomationProperties.Name="Caminho do arquivo do modelo" />
                             </Border>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="Servidor HTTP" Style="{StaticResource SectionTitleStyle}" />
-                                    <TextBlock Text="Defina onde a API OpenAI/Anthropic ficará disponível." Style="{StaticResource HelperStyle}" Margin="0,0,0,16" />
-                                    <Grid ColumnSpacing="16" RowSpacing="14">
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0"><TextBlock Text="Host" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="HostBox" Text="0.0.0.0" AutomationProperties.Name="Host" /></StackPanel>
-                                        <StackPanel Grid.Column="1"><TextBlock Text="Porta" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="PortBox" Text="8088" AutomationProperties.Name="Porta" /></StackPanel>
-                                        <StackPanel Grid.Column="2"><TextBlock Text="Concorrência" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="ConcurrencyBox" Text="1" AutomationProperties.Name="Concorrência máxima" /></StackPanel>
-                                        <StackPanel Grid.Row="1" Grid.Column="0"><TextBlock Text="Intervalo de estatísticas (ms)" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="StatsIntervalBox" Text="1500" AutomationProperties.Name="Intervalo de estatísticas" /></StackPanel>
-                                    </Grid>
-                                    <TextBlock Text="Host 0.0.0.0 aceita conexões na rede local; use 127.0.0.1 para acesso somente neste PC." Style="{StaticResource HelperStyle}" />
-                                </StackPanel>
+
+                            <TextBlock Text="Endpoint HTTP" Style="{StaticResource GroupHeaderStyle}" />
+
+                            <local:SettingsRow Glyph="&#xE968;" Header="Host"
+                                               Description="0.0.0.0 aceita conexões da rede local; 127.0.0.1 restringe a este PC.">
+                                <TextBox x:Name="HostBox" Text="0.0.0.0" MinWidth="150"
+                                         AutomationProperties.Name="Host" />
+                            </local:SettingsRow>
+
+                            <local:SettingsRow Header="Porta" Description="Porta TCP onde a API responde.">
+                                <NumberBox x:Name="PortBox" Value="8088" Minimum="1" Maximum="65535"
+                                           Style="{StaticResource CompactNumberBoxStyle}"
+                                           AutomationProperties.Name="Porta" />
+                            </local:SettingsRow>
+
+                            <local:SettingsRow Header="Concorrência"
+                                               Description="Requisições atendidas em paralelo. Cada lane reserva memória na GPU.">
+                                <NumberBox x:Name="ConcurrencyBox" Value="1" Minimum="1" Maximum="8"
+                                           Style="{StaticResource CompactNumberBoxStyle}"
+                                           AutomationProperties.Name="Concorrência máxima" />
+                            </local:SettingsRow>
+
+                            <local:SettingsRow Header="Intervalo de estatísticas"
+                                               Description="Milissegundos entre os relatórios de throughput no log. 0 desativa.">
+                                <NumberBox x:Name="StatsIntervalBox" Value="1500" Minimum="0" Maximum="600000"
+                                           SmallChange="100" LargeChange="1000"
+                                           Style="{StaticResource CompactNumberBoxStyle}"
+                                           AutomationProperties.Name="Intervalo de estatísticas em milissegundos" />
+                            </local:SettingsRow>
+
+                            <TextBlock Text="Backend" Style="{StaticResource GroupHeaderStyle}" />
+
+                            <local:SettingsRow x:Name="ServerHint" Glyph="&#xE7B8;" Header="Executável do servidor"
+                                               Description="Detectado automaticamente ao lado do app.">
+                                <Button Click="BrowseServer_Click" ToolTipService.ToolTip="Escolher outro ninfer-serve.exe">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE712;" FontSize="14" />
+                                        <TextBlock Text="Alterar" />
+                                    </StackPanel>
+                                </Button>
+                            </local:SettingsRow>
+
+                            <Border Style="{StaticResource CardStyle}" Padding="16,12">
+                                <TextBox x:Name="ServerPathBox" IsReadOnly="True" Header="Caminho do executável"
+                                         Style="{StaticResource MonoTextBoxStyle}"
+                                         AutomationProperties.Name="Caminho do executável ninfer-serve" />
                             </Border>
                         </StackPanel>
                     </ScrollViewer>
+
                     <ScrollViewer x:Name="ServerCommandPane" Grid.Row="0" Grid.Column="1"
                                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="Backend" Style="{StaticResource SectionTitleStyle}" />
-                                    <TextBlock Text="Executável usado pelo app" Style="{StaticResource FieldLabelStyle}" Margin="0,14,0,6" />
-                                    <Grid ColumnSpacing="8">
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <TextBox x:Name="ServerPathBox" IsReadOnly="True" AutomationProperties.Name="Executável ninfer-serve" />
-                                        <Button Grid.Column="1" Click="BrowseServer_Click" ToolTipService.ToolTip="Selecionar executável ninfer-serve.exe"><FontIcon Glyph="&#xE712;" FontFamily="{ThemeResource SymbolThemeFontFamily}" /></Button>
-                                    </Grid>
-                                    <TextBlock x:Name="ServerHint" Text="Detectado automaticamente ao lado do build do NInfer." Style="{StaticResource HelperStyle}" />
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="Comando gerado" Style="{StaticResource SectionTitleStyle}" />
-                                    <TextBlock Text="Confira os argumentos antes de iniciar o processo." Style="{StaticResource HelperStyle}" Margin="0,0,0,12" />
-                                    <TextBox x:Name="CommandPreview" Style="{StaticResource MonoTextBoxStyle}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="164" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Comando gerado" />
-                                    <Button Content="Copiar comando" Click="CopyCommand_Click" HorizontalAlignment="Left" Margin="0,12,0,0" />
-                                </StackPanel>
-                            </Border>
+                        <StackPanel Spacing="12">
                             <Border Style="{StaticResource CardStyle}">
                                 <StackPanel Spacing="12">
-                                    <TextBlock Text="Operação" Style="{StaticResource SectionTitleStyle}" />
-                                    <TextBlock x:Name="StatusDetail" Text="Escolha um modelo e inicie o servidor." Style="{StaticResource HelperStyle}" Margin="0" />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <Button x:Name="StartButton" Click="Start_Click" Style="{StaticResource AccentButtonStyle}"><StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE768;" FontFamily="{ThemeResource SymbolThemeFontFamily}" /><TextBlock Text="Iniciar servidor" /></StackPanel></Button>
-                                        <Button x:Name="StopButton" Click="Stop_Click" IsEnabled="False"><StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE71A;" FontFamily="{ThemeResource SymbolThemeFontFamily}" /><TextBlock Text="Parar" /></StackPanel></Button>
-                                        <Button x:Name="OpenBrowserButton" Content="Abrir API" Click="OpenBrowser_Click" IsEnabled="False" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                        <FontIcon Glyph="&#xE7C4;" FontSize="16" VerticalAlignment="Center" />
+                                        <TextBlock Text="Operação" Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                   VerticalAlignment="Center" />
                                     </StackPanel>
-                                    <Button Content="Ver logs" Click="ShowLogs_Click" HorizontalAlignment="Left" />
+                                    <TextBlock x:Name="StatusDetail" Text="Escolha um modelo e inicie o servidor."
+                                               Style="{StaticResource BodyTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               TextWrapping="Wrap" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Button x:Name="StartButton" Click="Start_Click" Style="{StaticResource AccentButtonStyle}"
+                                                ToolTipService.ToolTip="Iniciar o servidor (Ctrl+R)">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE768;" FontSize="14" />
+                                                <TextBlock Text="Iniciar" />
+                                            </StackPanel>
+                                            <Button.KeyboardAccelerators>
+                                                <KeyboardAccelerator Modifiers="Control" Key="R" />
+                                            </Button.KeyboardAccelerators>
+                                        </Button>
+                                        <Button x:Name="StopButton" Click="Stop_Click" IsEnabled="False"
+                                                ToolTipService.ToolTip="Parar o servidor (Ctrl+P)">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE71A;" FontSize="14" />
+                                                <TextBlock Text="Parar" />
+                                            </StackPanel>
+                                            <Button.KeyboardAccelerators>
+                                                <KeyboardAccelerator Modifiers="Control" Key="P" />
+                                            </Button.KeyboardAccelerators>
+                                        </Button>
+                                        <Button x:Name="OpenBrowserButton" Click="OpenBrowser_Click" IsEnabled="False"
+                                                ToolTipService.ToolTip="Abrir o endpoint no navegador">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE774;" FontSize="14" />
+                                                <TextBlock Text="Abrir API" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                    <HyperlinkButton Content="Ver logs do servidor" Click="ShowLogs_Click" Padding="0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource CardStyle}">
+                                <StackPanel Spacing="12">
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <FontIcon Glyph="&#xE756;" FontSize="16" VerticalAlignment="Center" />
+                                            <TextBlock Text="Comando gerado" Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <Button x:Name="CopyCommandButton" Click="CopyCommand_Click"
+                                                HorizontalAlignment="Right" Padding="10,4"
+                                                ToolTipService.ToolTip="Copiar comando (Ctrl+Shift+C)">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE8C8;" FontSize="14" />
+                                                <TextBlock Text="Copiar" />
+                                            </StackPanel>
+                                            <Button.KeyboardAccelerators>
+                                                <KeyboardAccelerator Modifiers="Control,Shift" Key="C" />
+                                            </Button.KeyboardAccelerators>
+                                        </Button>
+                                    </Grid>
+                                    <TextBox x:Name="CommandPreview" Style="{StaticResource MonoTextBoxStyle}"
+                                             IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" Height="170"
+                                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             AutomationProperties.Name="Comando gerado" />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -168,58 +258,168 @@
                 </Grid>
             </Grid>
 
+            <!-- ==================== AVANÇADO ==================== -->
             <Grid x:Name="AdvancedView" Visibility="Collapsed">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel MaxWidth="960" HorizontalAlignment="Left">
-                        <TextBlock Text="Configurações avançadas" FontSize="32" FontWeight="Bold" Foreground="{ThemeResource PrimaryTextBrush}" />
-                        <TextBlock Text="Ajuste memória, cache e execução especulativa. As alterações são salvas automaticamente." FontSize="15" Foreground="{ThemeResource MutedTextBrush}" Margin="0,6,0,24" />
-                        <Border Style="{StaticResource CardStyle}">
-                            <StackPanel>
-                                <TextBlock Text="Memória e contexto" Style="{StaticResource SectionTitleStyle}" />
-                                <Grid ColumnSpacing="16" RowSpacing="14" Margin="0,14,0,0">
-                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0"><TextBlock Text="Contexto máximo" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="MaxContextBox" Text="210000" AutomationProperties.Name="Contexto máximo" /></StackPanel>
-                                    <StackPanel Grid.Column="1"><TextBlock Text="Tokens padrão" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="DefaultTokensBox" Text="80000" AutomationProperties.Name="Tokens máximos padrão" /></StackPanel>
-                                    <StackPanel Grid.Column="2"><TextBlock Text="Tipo do KV cache" Style="{StaticResource FieldLabelStyle}" /><ComboBox x:Name="KvDtypeBox" SelectedIndex="1" AutomationProperties.Name="Tipo do KV cache"><ComboBoxItem Content="BF16" Tag="bf16" /><ComboBoxItem Content="INT8" Tag="int8" /></ComboBox></StackPanel>
-                                    <StackPanel Grid.Row="1" Grid.Column="0"><TextBlock Text="Capacidade do KV" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="KvCapacityBox" Text="210000" AutomationProperties.Name="Capacidade do KV" /></StackPanel>
-                                    <CheckBox x:Name="KvAutoBox" Grid.Row="1" Grid.Column="1" VerticalAlignment="Bottom" Click="KvAuto_Click"><TextBlock Text="Calcular capacidade automaticamente" TextWrapping="Wrap" /></CheckBox>
-                                </Grid>
-                                <TextBlock Text="A capacidade explícita precisa ser igual ou maior que o contexto máximo." Style="{StaticResource HelperStyle}" />
-                            </StackPanel>
-                        </Border>
-                        <Border Style="{StaticResource CardStyle}">
-                            <StackPanel>
-                                <TextBlock Text="Execução" Style="{StaticResource SectionTitleStyle}" />
-                                <Grid ColumnSpacing="16" Margin="0,14,0,0">
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0"><TextBlock Text="Backend especulativo" Style="{StaticResource FieldLabelStyle}" /><ComboBox x:Name="SpecBox" SelectedIndex="1" SelectionChanged="Spec_SelectionChanged" AutomationProperties.Name="Backend especulativo"><ComboBoxItem Content="Desativado" Tag="off" /><ComboBoxItem Content="MTP" Tag="mtp" /><ComboBoxItem Content="DFlash (35B-A3B)" Tag="dflash" /></ComboBox></StackPanel>
-                                    <StackPanel Grid.Column="1"><TextBlock Text="Draft tokens" Style="{StaticResource FieldLabelStyle}" /><TextBox x:Name="DraftTokensBox" Text="3" AutomationProperties.Name="Draft tokens" /></StackPanel>
-                                </Grid>
-                                <StackPanel Spacing="8" Margin="0,16,0,0">
-                                    <CheckBox x:Name="LmHeadDraftBox" Content="Usar LM head otimizado para draft" IsChecked="True" />
-                                    <CheckBox x:Name="VisionBox" Content="Ativar Vision para imagem e vídeo" />
-                                    <CheckBox x:Name="NoThinkingBox" Content="Desativar modo thinking padrão" />
-                                    <CheckBox x:Name="PreserveThinkingBox" Content="Preservar thinking entre turnos" />
-                                    <CheckBox x:Name="CorsBox" Content="Permitir CORS para clientes web" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
+                    <StackPanel MaxWidth="1000" HorizontalAlignment="Left" Spacing="4">
+                        <TextBlock Text="Ajustes avançados" Style="{StaticResource PageTitleStyle}" />
+                        <TextBlock Text="Memória, cache e execução especulativa. As alterações são salvas sozinhas."
+                                   Style="{StaticResource PageSubtitleStyle}" Margin="0,4,0,8" />
+
+                        <TextBlock Text="Memória e contexto" Style="{StaticResource GroupHeaderStyle}" />
+
+                        <local:SettingsRow Glyph="&#xE9D5;" Header="Contexto máximo"
+                                           Description="Teto de tokens por requisição.">
+                            <NumberBox x:Name="MaxContextBox" Value="210000" Minimum="1" Maximum="8000000"
+                                       SmallChange="1000" LargeChange="10000"
+                                       Style="{StaticResource CompactNumberBoxStyle}"
+                                       AutomationProperties.Name="Contexto máximo" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Header="Tokens padrão"
+                                           Description="Usado quando a requisição não informa max_tokens.">
+                            <NumberBox x:Name="DefaultTokensBox" Value="80000" Minimum="1" Maximum="8000000"
+                                       SmallChange="1000" LargeChange="10000"
+                                       Style="{StaticResource CompactNumberBoxStyle}"
+                                       AutomationProperties.Name="Tokens máximos padrão" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Glyph="&#xEDA2;" Header="Precisão do KV cache"
+                                           Description="INT8 dobra a capacidade; BF16 preserva a precisão.">
+                            <ComboBox x:Name="KvDtypeBox" SelectedIndex="1" MinWidth="150"
+                                      AutomationProperties.Name="Tipo do KV cache">
+                                <ComboBoxItem Content="BF16" Tag="bf16" />
+                                <ComboBoxItem Content="INT8" Tag="int8" />
+                            </ComboBox>
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Header="Capacidade automática do KV"
+                                           Description="Dimensiona sozinho, deixando 1024 MiB de folga.">
+                            <ToggleSwitch x:Name="KvAutoBox" Toggled="KvAuto_Toggled"
+                                          OnContent="Ligado" OffContent="Desligado"
+                                          AutomationProperties.Name="Calcular capacidade do KV automaticamente" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow x:Name="KvCapacityCard" Header="Capacidade do KV"
+                                           Description="Precisa ser igual ou maior que o contexto máximo.">
+                            <NumberBox x:Name="KvCapacityBox" Value="210000" Minimum="0" Maximum="8000000"
+                                       SmallChange="1000" LargeChange="10000"
+                                       Style="{StaticResource CompactNumberBoxStyle}"
+                                       AutomationProperties.Name="Capacidade do KV" />
+                        </local:SettingsRow>
+
+                        <TextBlock Text="Execução especulativa" Style="{StaticResource GroupHeaderStyle}" />
+
+                        <local:SettingsRow Glyph="&#xE945;" Header="Backend especulativo"
+                                           Description="Gera tokens de rascunho para acelerar a decodificação.">
+                            <ComboBox x:Name="SpecBox" SelectedIndex="1" SelectionChanged="Spec_SelectionChanged"
+                                      MinWidth="180" AutomationProperties.Name="Backend especulativo">
+                                <ComboBoxItem Content="Desativado" Tag="off" />
+                                <ComboBoxItem Content="MTP" Tag="mtp" />
+                                <ComboBoxItem Content="DFlash (35B-A3B)" Tag="dflash" />
+                            </ComboBox>
+                        </local:SettingsRow>
+
+                        <local:SettingsRow x:Name="DraftTokensCard" Header="Draft tokens"
+                                           Description="Até 5 no MTP, até 15 no DFlash.">
+                            <NumberBox x:Name="DraftTokensBox" Value="3" Minimum="1" Maximum="15"
+                                       Style="{StaticResource CompactNumberBoxStyle}"
+                                       AutomationProperties.Name="Draft tokens" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow x:Name="LmHeadDraftCard" Header="LM head otimizado para draft"
+                                           Description="Disponível somente com MTP.">
+                            <ToggleSwitch x:Name="LmHeadDraftBox" IsOn="True" Toggled="Option_Toggled"
+                                          AutomationProperties.Name="Usar LM head otimizado para draft" />
+                        </local:SettingsRow>
+
+                        <TextBlock Text="Recursos" Style="{StaticResource GroupHeaderStyle}" />
+
+                        <local:SettingsRow Glyph="&#xEB9F;" Header="Vision"
+                                           Description="Habilita imagem e vídeo e reserva as alocações fixas na GPU.">
+                            <ToggleSwitch x:Name="VisionBox" Toggled="Option_Toggled"
+                                          AutomationProperties.Name="Ativar Vision" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Glyph="&#xE9CE;" Header="Desativar thinking padrão"
+                                           Description="Requisições ainda podem ativar o modo explicitamente.">
+                            <ToggleSwitch x:Name="NoThinkingBox" Toggled="Option_Toggled"
+                                          AutomationProperties.Name="Desativar modo thinking padrão" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Header="Preservar thinking entre turnos"
+                                           Description="Mantém o raciocínio de turnos fechados nos prompts seguintes.">
+                            <ToggleSwitch x:Name="PreserveThinkingBox" Toggled="Option_Toggled"
+                                          AutomationProperties.Name="Preservar thinking entre turnos" />
+                        </local:SettingsRow>
+
+                        <local:SettingsRow Glyph="&#xE774;" Header="CORS"
+                                           Description="Necessário para clientes web servidos de outra origem.">
+                            <ToggleSwitch x:Name="CorsBox" Toggled="Option_Toggled"
+                                          AutomationProperties.Name="Permitir CORS" />
+                        </local:SettingsRow>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
 
+            <!-- ==================== LOGS ==================== -->
             <Grid x:Name="LogsView" Visibility="Collapsed" MinHeight="0">
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
                 <StackPanel>
-                    <TextBlock Text="Logs do servidor" FontSize="32" FontWeight="Bold" Foreground="{ThemeResource PrimaryTextBrush}" />
-                    <TextBlock Text="stdout e stderr em tempo real. Esta tela ocupa toda a área de trabalho." FontSize="15" Foreground="{ThemeResource MutedTextBrush}" Margin="0,6,0,0" />
+                    <TextBlock Text="Logs do servidor" Style="{StaticResource PageTitleStyle}" />
+                    <TextBlock Text="stdout e stderr do processo, em tempo real."
+                               Style="{StaticResource PageSubtitleStyle}" />
                 </StackPanel>
-                <CommandBar Grid.Row="1" DefaultLabelPosition="Right" Margin="0,16,0,16">
-                    <AppBarButton Label="Abrir em outra janela" Icon="OpenFile" Click="OpenLogWindow_Click" />
-                    <AppBarButton Label="Limpar" Icon="Clear" Click="ClearLog_Click" />
+                <!-- Glyphs are given explicitly: the Symbol enum does not carry every icon these
+                     commands want, and an unknown name fails at parse time, not at compile time. -->
+                <CommandBar Grid.Row="1" DefaultLabelPosition="Right" Background="Transparent"
+                            HorizontalAlignment="Left" Margin="-12,12,0,12">
+                    <AppBarButton Label="Copiar" Click="CopyLog_Click"
+                                  ToolTipService.ToolTip="Copiar todo o log">
+                        <AppBarButton.Icon>
+                            <FontIcon Glyph="&#xE8C8;" />
+                        </AppBarButton.Icon>
+                    </AppBarButton>
+                    <AppBarButton Label="Limpar" Click="ClearLog_Click">
+                        <AppBarButton.Icon>
+                            <FontIcon Glyph="&#xE74D;" />
+                        </AppBarButton.Icon>
+                    </AppBarButton>
+                    <AppBarButton Label="Nova janela" Click="OpenLogWindow_Click"
+                                  ToolTipService.ToolTip="Abrir o log em uma janela separada">
+                        <AppBarButton.Icon>
+                            <FontIcon Glyph="&#xE8A7;" />
+                        </AppBarButton.Icon>
+                    </AppBarButton>
+                    <AppBarSeparator />
+                    <AppBarToggleButton x:Name="AutoScrollToggle" Label="Rolagem automática" IsChecked="True"
+                                        ToolTipService.ToolTip="Acompanhar o fim do log conforme ele cresce">
+                        <AppBarToggleButton.Icon>
+                            <FontIcon Glyph="&#xE74B;" />
+                        </AppBarToggleButton.Icon>
+                    </AppBarToggleButton>
+                    <AppBarToggleButton x:Name="WrapToggle" Label="Quebrar linhas" Click="WrapToggle_Click">
+                        <AppBarToggleButton.Icon>
+                            <FontIcon Glyph="&#xE8A1;" />
+                        </AppBarToggleButton.Icon>
+                    </AppBarToggleButton>
                 </CommandBar>
-                <TextBox x:Name="LogTextBox" Grid.Row="2" Style="{StaticResource MonoTextBoxStyle}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="0" VerticalAlignment="Stretch" VerticalContentAlignment="Top" Background="{ThemeResource TerminalBrush}" Foreground="{ThemeResource TerminalTextBrush}" BorderBrush="{ThemeResource CardStrokeBrush}" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Log do servidor" />
+                <Border Grid.Row="2" CornerRadius="{ThemeResource ControlCornerRadius}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                    <TextBox x:Name="LogTextBox" Style="{StaticResource MonoTextBoxStyle}"
+                             IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                             MinHeight="0" VerticalAlignment="Stretch"
+                             Background="{ThemeResource TerminalBrush}"
+                             Foreground="{ThemeResource TerminalTextBrush}"
+                             BorderThickness="0"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                             AutomationProperties.Name="Log do servidor" />
+                </Border>
             </Grid>
         </Grid>
     </NavigationView>

@@ -1,3 +1,4 @@
+﻿using System.IO;
 using Microsoft.UI.Xaml;
 
 namespace NInferControl;
@@ -10,6 +11,18 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        UnhandledException += (_, e) =>
+        {
+            try
+            {
+                var path = Path.Combine(Path.GetTempPath(), "NInferControl-crash.log");
+                File.WriteAllText(path, DateTime.Now.ToString("O") + Environment.NewLine + e.Exception);
+            }
+            catch
+            {
+                // Nothing useful to do if even the crash log cannot be written.
+            }
+        };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

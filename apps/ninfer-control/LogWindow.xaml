@@ -15,7 +15,7 @@
 
         <TitleBar x:Name="AppTitleBar" Title="NInfer Control — Log" />
 
-        <Grid Grid.Row="1" Background="{ThemeResource AppBackgroundBrush}" Padding="16">
+        <Grid Grid.Row="1" Padding="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -23,18 +23,20 @@
 
             <Grid Grid.Row="0" Margin="0,0,0,12">
                 <StackPanel>
-                    <TextBlock Text="Log do servidor" FontSize="24" FontWeight="SemiBold"
-                               Foreground="{ThemeResource PrimaryTextBrush}" />
+                    <TextBlock Text="Log do servidor" Style="{StaticResource SubtitleTextBlockStyle}" />
                     <TextBlock Text="stdout + stderr • acompanha a execução em tempo real"
-                               Foreground="{ThemeResource MutedTextBrush}" FontSize="13" />
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
                 <Button x:Name="ClearButton" Content="Limpar visualização" Click="ClearButton_Click"
                         HorizontalAlignment="Right" VerticalAlignment="Center" />
             </Grid>
 
             <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True"
-                     TextWrapping="NoWrap" FontFamily="Cascadia Mono" FontSize="12"
-                     Background="{ThemeResource TerminalBrush}" BorderBrush="{ThemeResource CardStrokeBrush}"
+                     TextWrapping="NoWrap" FontFamily="Cascadia Mono, Consolas, Courier New" FontSize="12"
+                     Background="{ThemeResource TerminalBrush}" Foreground="{ThemeResource TerminalTextBrush}"
+                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                     CornerRadius="{ThemeResource ControlCornerRadius}"
                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                      AutomationProperties.Name="Log do servidor" />
         </Grid>
