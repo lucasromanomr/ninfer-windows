@@ -45,12 +45,22 @@ jobs:
 
       # sm_120a is the only architecture the build accepts. nvcc emits it without a GPU present,
       # so the runner needs the toolkit but no NVIDIA hardware.
+      # Installed whole rather than by sub-package: the component names changed in CUDA 13 and the
+      # action skips the ones it does not recognise, leaving a toolkit whose nvcc runs but whose
+      # include/crt is missing, which fails as "Cannot open include file: 'crt/host_config.h'".
       - name: Set up CUDA ${{ env.CUDA_VERSION }}
         uses: Jimver/cuda-toolkit@v0.2.36
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "cufft", "cufft_dev", "nvrtc", "nvrtc_dev", "thrust", "cuda_profiler_api", "visual_studio_integration"]'
+
+      - name: Verify CUDA layout
+        shell: pwsh
+        run: |
+          $required = 'bin\nvcc.exe', 'include\cuda_runtime.h', 'include\crt\host_config.h', 'include\cccl\cuda\std\version', 'lib\x64\cudart_static.lib'
+          $missing = $required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $env:CUDA_PATH $_)) }
+          if ($missing) { throw "Instalação do CUDA incompleta em $env:CUDA_PATH; faltando: $($missing -join ', ')" }
+          & (Join-Path $env:CUDA_PATH 'bin\nvcc.exe') --version
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
