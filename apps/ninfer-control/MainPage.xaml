@@ -163,7 +163,7 @@
                             <TextBlock Text="Backend" Style="{StaticResource GroupHeaderStyle}" />
 
                             <local:SettingsRow x:Name="ServerHint" Glyph="&#xE7B8;" Header="Executável do servidor"
-                                               Description="Detectado automaticamente ao lado do app.">
+                                               Description="Vem com o app e é detectado automaticamente.">
                                 <Button Click="BrowseServer_Click" ToolTipService.ToolTip="Escolher outro ninfer-serve.exe">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <FontIcon Glyph="&#xE712;" FontSize="14" />

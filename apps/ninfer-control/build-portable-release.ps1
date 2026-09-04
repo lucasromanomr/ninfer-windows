@@ -38,6 +38,10 @@ if (Test-Path -LiteralPath $outputPath) {
 }
 New-Item -ItemType Directory -Path $outputPath | Out-Null
 
+# NInferServerDirectory carries the server binaries into the bundle, and
+# IncludeAllContentForSelfExtract makes the runtime unpack them next to the managed assemblies,
+# which is where AppContext.BaseDirectory points: the app resolves the server with nothing beside
+# the executable.
 & dotnet publish $projectPath -c Release -p:Platform=x64 -r win-x64 --self-contained true `
     -p:WindowsPackageType=None `
     -p:EnableMsixTooling=true `
@@ -45,6 +49,7 @@ New-Item -ItemType Directory -Path $outputPath | Out-Null
     -p:IncludeAllContentForSelfExtract=true `
     -p:PublishSingleFile=true `
     -p:PublishTrimmed=false `
+    "-p:NInferServerDirectory=$serverReleasePath" `
     "-o:$outputPath"
 if ($LASTEXITCODE -ne 0) {
     throw "A publicação portátil falhou com código $LASTEXITCODE."
@@ -55,14 +60,12 @@ if (-not (Test-Path -LiteralPath $executable)) {
     throw 'O executável portátil não foi gerado.'
 }
 
-# ninfer-serve.exe sits next to NInferControl.exe: it is the first candidate probed by
-# FindServerExecutable, so the app resolves the server without manual configuration.
-$payload = Get-ChildItem -LiteralPath $serverReleasePath -File |
-    Where-Object { $_.Extension -in '.exe', '.dll' }
-foreach ($file in $payload) {
-    Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $outputPath $file.Name) -Force
+$stray = Get-ChildItem -LiteralPath $outputPath -File |
+    Where-Object { $_.Name -in 'ninfer-serve.exe', 'ninfer.exe' }
+if ($stray) {
+    throw 'Os binarios do servidor ficaram soltos na pasta em vez de entrar no executavel.'
 }
-Write-Host "Servidor incluído: $($payload.Count) arquivo(s) de $serverReleasePath."
+Write-Host "Servidor embutido no executável a partir de $serverReleasePath."
 
 $readmePath = Join-Path $outputPath 'LEIA-ME.txt'
 @'
@@ -71,13 +74,17 @@ NInfer Control - versão portátil
 Não requer instalação, certificado, MSIX ou permissão de administrador.
 Abra NInferControl.exe diretamente.
 
-O ninfer-serve.exe acompanha o pacote, nesta mesma pasta, junto das DLLs de que
-precisa. O app o encontra sozinho - não é preciso apontar o servidor na tela de
-configuração. Mantenha os arquivos juntos ao mover a pasta.
+O ninfer-serve.exe vai embutido dentro do NInferControl.exe. Não há nada para
+instalar, copiar junto ou apontar na tela de configuração: o app encontra o
+servidor sozinho. O executável é o pacote inteiro - pode movê-lo para onde quiser.
 
-Se o app continuar abrindo outro servidor, é porque há um caminho salvo de uma
-execução anterior em %LOCALAPPDATA%\NInferControl\settings.json. Apague o campo
-ServerPath ou aponte o executável desta pasta.
+Na primeira execução o Windows leva alguns segundos a mais para abrir, porque o
+conteúdo embutido é descompactado em cache. As execuções seguintes reaproveitam
+esse cache.
+
+Se o app abrir outro servidor que não o embutido, é porque há um caminho salvo de
+uma execução anterior em %LOCALAPPDATA%\NInferControl\settings.json. Apague o
+campo ServerPath.
 
 As configurações ficam em %LOCALAPPDATA%\NInferControl\settings.json.
 '@ | Set-Content -LiteralPath $readmePath -Encoding utf8
@@ -94,4 +101,3 @@ else {
 }
 
 Write-Host "Executável: $executable"
-Write-Host "Servidor: $(Join-Path $outputPath 'ninfer-serve.exe')"

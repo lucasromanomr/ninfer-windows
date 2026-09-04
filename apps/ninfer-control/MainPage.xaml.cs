@@ -581,8 +581,10 @@ public sealed partial class MainPage : Page
     private static string Quote(string value)
         => $"\"{value.Replace("\"", "\\\"")}\"";
 
-    // O pacote portatil traz o ninfer-serve.exe ao lado do NInferControl.exe; quando ele
-    // existe, tem prioridade sobre o caminho salvo, que pode apontar para um build antigo.
+    // The shipped server sits next to the executable: beside NInferControl.exe in an MSIX install,
+    // and in the runtime's extraction directory for the single-file portable build, which is what
+    // AppContext.BaseDirectory reports in both cases. It wins over a saved path, which may point at
+    // an older build.
     private static string? BundledServerExecutable()
     {
         var bundled = Path.Combine(AppContext.BaseDirectory, "ninfer-serve.exe");

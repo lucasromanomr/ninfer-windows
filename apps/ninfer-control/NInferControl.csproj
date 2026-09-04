@@ -40,7 +40,6 @@
     <Content Include="$(NInferServerDirectory)\*.exe;$(NInferServerDirectory)\*.dll">
       <Link>%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
 

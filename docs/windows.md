@@ -98,16 +98,19 @@ permission) with:
 .\apps\ninfer-control\build-portable-release.ps1
 ```
 
-The script builds the native server first, publishes the app, and then copies `ninfer-serve.exe`,
-`ninfer.exe`, and their DLLs next to `NInferControl.exe`. A bundled server takes precedence over a
-path saved from an earlier session, so the extracted package runs without pointing at a server by
-hand. Run it from a developer prompt, as above; `-SkipServerBuild` reuses an existing build tree,
-`-ServerBuildDirectory`, `-VcpkgRoot`, and `-CudaRoot` override the defaults, and `-SkipZip` leaves
-the folder without archiving it. Close any `NInferControl.exe` running from the output folder
-first, or the cleanup step fails.
+The script builds the native server first, then publishes the app with the server binaries inside
+the single file. `IncludeAllContentForSelfExtract` makes the runtime unpack them beside the managed
+assemblies, which is the directory `AppContext.BaseDirectory` reports, so the app resolves the
+server with nothing next to the executable. The shipped server takes precedence over a path saved
+from an earlier session, so the package never opens a stale binary. Run it from a developer prompt,
+as above; `-SkipServerBuild` reuses an existing build tree, `-ServerBuildDirectory`, `-VcpkgRoot`,
+and `-CudaRoot` override the defaults, and `-SkipZip` leaves the folder without archiving it. Close
+any `NInferControl.exe` running from the output folder first, or the cleanup step fails.
 
-Distribute `dist\NInferControl-Portable-x64.zip`. After extracting it, run
-`NInferControl.exe` directly.
+The deliverable is a single ~540 MB `NInferControl.exe`; `dist\NInferControl-Portable-x64.zip`
+wraps it with a readme. The first launch pays a few extra seconds to unpack the bundled content
+into its cache; later launches reuse it. Users who want the server on its own take
+`ninfer-server-x64.zip` instead.
 
 The MSIX variant is available only for environments that can trust a local signing
 certificate:
@@ -116,7 +119,7 @@ certificate:
 .\apps\ninfer-control\build-release.ps1
 ```
 
-It bundles the server too, through the `NInferServerDirectory` property: an MSIX is a signed
+It bundles the server too, through the same `NInferServerDirectory` property: an MSIX is a signed
 container, so the binaries enter during packaging rather than being copied in afterwards, and they
 land next to `NInferControl.exe` in the install folder. The script takes the same
 `-SkipServerBuild`, `-ServerBuildDirectory`, `-VcpkgRoot`, and `-CudaRoot` switches as the portable
@@ -138,7 +141,7 @@ without a GPU present.
 Two archives are produced, uploaded as workflow artifacts and attached to the release:
 
 ```text
-dist/NInferControl-Portable-x64.zip   app plus ninfer-serve.exe, ninfer.exe, and their DLLs
+dist/NInferControl-Portable-x64.zip   one executable with the server inside it
 dist/ninfer-server-x64.zip            server binaries only
 ```
 
